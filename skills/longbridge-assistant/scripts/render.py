@@ -70,7 +70,15 @@ def totals(rows, side):
     return copy or ("未提供" if missing else "—")
 
 
-def account_html(data, previous_date):
+def snapshot_html(data):
+    balances=data['balances'];holdings=data['holdings']
+    stats=''.join('<div class="stat"><span class="meta">账户净资产 · '+e(r['currency'])+'</span><strong>'+money(r['net_assets'],r['currency'] or '')+'</strong></div><div class="stat"><span class="meta">总现金 · '+e(r['currency'])+'</span><strong>'+money(r['total_cash'],r['currency'] or '')+'</strong></div>' for r in balances['rows'])
+    rows=''.join('<tr><td>'+e(r['name'])+'<br>'+e(r['symbol'])+'</td><td>'+e(r['quantity'])+('<br><span class="muted">实际合约乘数 '+e(r['multiplier'])+'</span>' if r.get('multiplier') else '')+'</td><td>'+e(r['currency'])+' '+e(r['cost_price'])+'</td><td>'+e(r['currency'])+' '+e(r['price'])+'<br><span class="muted">'+e(r['quote_time'])+'</span></td><td>'+money(r['pnl'],r['currency'] or '')+'<br><span class="muted">'+e(r['gap'] or '按账户成本价计算')+'</span></td></tr>' for r in holdings['rows'])
+    if not rows:rows='<tr><td colspan="5">'+('当前无证券持仓' if holdings['status']=='完整但为空' else '持仓查询未完整取得')+'</td></tr>'
+    return '<h3>账户金额与当前持仓</h3><p class="meta">快照 '+e(data['as_of'])+' · 金额 '+e(balances['status'])+' · 持仓 '+e(holdings['status'])+'</p><div class="stats">'+(stats or '<p>账户金额未取得</p>')+'</div><div class="table-wrap"><table><thead><tr><th>当前持仓</th><th>数量</th><th>账户成本价</th><th>参考价 / 报价时间</th><th>持仓盈亏（按券商成本估算）</th></tr></thead><tbody>'+rows+'</tbody></table></div><p class="meta">账户金额为长桥原字段，各币种分别显示，不相加。持仓成本遵循账户平均买入/摊薄成本设置；持仓盈亏（按券商成本估算）为参考价与成本价差额乘数量，成本模式未提供，摊薄成本可能包含历史盈亏；不能等同纯未实现收益。报价按所示时间；缺项或期权单位未核对则不计算。本表是证券持仓，未纳入独立基金持仓接口。</p><hr>'
+
+
+def account_html(data, previous_date, snapshot=None):
     rows = data["rows"]
     groups = defaultdict(list)
     for row in rows:
@@ -112,9 +120,9 @@ def account_html(data, previous_date):
     repeated = " · 与上次相同交易日" if previous_date and data.get("date") == previous_date else ""
     reason = f'<p class="note">{e(data["reason"])}</p>' if data.get("reason") else ""
     return (
-        '<section class="panel" id="account"><div class="panel-head"><div><h2>仓位操作简报与成交明细</h2>'
+        '<section class="panel" id="account"><div class="panel-head"><div><h2>账户简报、持仓与操作明细</h2>'
         f'<div class="meta">US · {e(data.get("date") or "交易日未确定")}{e(repeated)}<br>{e(data.get("coverage"))}</div></div>{pill(data["status"])}</div>'
-        f'<div class="content">{reason}<div class="stats"><div class="stat"><span class="meta">成交 / 标的{e(subtotal)}</span><strong>{e(count)}</strong></div>'
+        f'<div class="content">{snapshot_html(snapshot) if snapshot else ""}{reason}<h3>上日操作与成交明细</h3><div class="stats"><div class="stat"><span class="meta">成交 / 标的{e(subtotal)}</span><strong>{e(count)}</strong></div>'
         f'<div class="stat"><span class="meta">买入成交额{e(subtotal)}</span><strong>{buy_total}</strong></div>'
         f'<div class="stat"><span class="meta">卖出成交额{e(subtotal)}</span><strong>{sell_total}</strong></div></div>'
         f'{details}</div></section>'
@@ -293,7 +301,7 @@ def render(root, account, public, analysis):
         )
         demo = '<div class="demo">合成演示数据 · 非真实账户或投资结论</div>' if public.get("demo") else ""
         body = demo + '<h1>今日简报</h1><p class="meta">上一完成交易日的仓位操作与港股打新提示</p>'
-        body += account_html(account["account"], previous.get("account_date"))
+        body += account_html(account["account"], previous.get("account_date"), account.get("snapshot"))
         body += ipo_section
         write_text(target / "index.html", page("今日简报", body, generated_at))
         write_json(target / ".manifest.json", {"owner": "longbridge-assistant", "generated_at": generated_at})

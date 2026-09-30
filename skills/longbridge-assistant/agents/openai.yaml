@@ -1,4 +1,4 @@
 interface:
   display_name: "长桥助手 · Longbridge Assistant"
-  short_description: "Daily trading activity briefs and simple HK IPO screening"
-  default_prompt: "用 $longbridge-assistant 更新今天的本地简报，先看上一交易日仓位操作与成交明细，再看港股打新提示。"
+  short_description: "Balances, holdings P/L, trading briefs and HK IPO screening"
+  default_prompt: "用 $longbridge-assistant 更新今天的本地简报，先看账户金额与持仓盈亏、上一交易日操作明细，再看港股打新提示。"

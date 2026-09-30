@@ -23,10 +23,11 @@ SYMBOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.(US|HK|CN|SG)$")
 OPTION = re.compile(r"^[A-Za-z0-9_.-]+[0-9]{6}[CP][0-9]+\.US$")
 READ_METHODS = {
     "quote.trading_days", "quote.trading_session", "quote.static_info",
-    "quote.option_quote", "trade.order_detail",
+    "quote.option_quote", "quote.quote", "trade.order_detail",
 }
 READ_PATHS = {
     "/v3/trade/execution/all", "/v1/ipo/profile", "/v1/ipo/timeline",
+    "/v1/asset/account", "/v1/asset/stock",
 }
 ENV_KEYS = {
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "LANG",
@@ -188,6 +189,72 @@ def mapping(rows):
     if not isinstance(rows, list) or any(not isinstance(item, dict) for item in rows):
         raise SafeError("quote_schema")
     return {symbol(item["symbol"]): item for item in rows}
+
+
+def numeric(value):
+    try:
+        if value is None or str(value).strip()=='':return None
+        n=Decimal(str(value));return n if n.is_finite() else None
+    except (ValueError,InvalidOperation):return None
+def collect_snapshot(provider,now):
+    balances={'status':'失败','reason':'账户金额未取得','rows':[]}
+    holdings={'status':'失败','reason':'持仓未取得','rows':[]}
+    try:
+        data=provider.get('/v1/asset/account')
+        if not isinstance(data,dict) or not isinstance(data.get('list'),list):raise SafeError('balance_schema')
+        rows=[];partial=False
+        for item in data['list']:
+            if not isinstance(item,dict):partial=True;continue
+            currency=item.get('currency')
+            net,cash=numeric(item.get('net_assets')),numeric(item.get('total_cash'))
+            valid=isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency)
+            partial=partial or not valid or net is None or cash is None
+            rows.append({'currency':currency if valid else None,'net_assets':str(net) if net is not None else None,'total_cash':str(cash) if cash is not None else None})
+        balances={'status':'部分完成' if partial else '完整' if rows else '完整但为空','reason':'部分金额或币种缺失' if partial else '', 'rows':rows}
+    except (SafeError,KeyError,TypeError,ValueError):pass
+    try:
+        data=provider.get('/v1/asset/stock')
+        if not isinstance(data,dict) or not isinstance(data.get('list'),list):raise SafeError('positions_schema')
+        rows=[];partial=False
+        for channel in data['list']:
+            if not isinstance(channel,dict) or not isinstance(channel.get('stock_info'),list):partial=True;continue
+            for item in channel['stock_info']:
+                if not isinstance(item,dict):partial=True;continue
+                qty=numeric(item.get('quantity'))
+                if qty==0:continue
+                currency=item.get('currency');currency=currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None
+                rows.append({'symbol':str(item.get('symbol') or '身份未提供'),'name':str(item.get('symbol_name') or ''),'currency':currency,'quantity':str(qty) if qty is not None else None,'cost_price':str(numeric(item.get('cost_price'))) if numeric(item.get('cost_price')) is not None else None,'price':None,'quote_time':None,'multiplier':None,'pnl':None,'gap':'盈亏所需字段尚未核对'})
+        query=sorted({row['symbol'] for row in rows if SYMBOL.fullmatch(row['symbol'])})
+        infos,quotes={},{}
+        if query:
+            try:infos=mapping(provider.call('quote.static_info',{'symbols':query}))
+            except (SafeError,KeyError,ValueError,TypeError):partial=True
+            try:quotes=mapping(provider.call('quote.quote',{'symbols':query}))
+            except (SafeError,KeyError,ValueError,TypeError):partial=True
+        options=sorted({row['symbol'] for row in rows if OPTION.fullmatch(row['symbol'])})
+        option_quotes={}
+        if options:
+            try:option_quotes=mapping(provider.call('quote.option_quote',{'symbols':options}))
+            except (SafeError,KeyError,ValueError,TypeError):partial=True
+        spot_boards={'USMain','USPink','HKEquity','SGMain','SHMainConnect','SHMainNonConnect','SHSTAR','SZMainConnect','SZMainNonConnect','SZGEMConnect','SZGEMNonConnect'}
+        for row in rows:
+            ticker=row['symbol'];info=infos.get(ticker,{});quote=quotes.get(ticker,{})
+            price=numeric(quote.get('last_done'))
+            try:stamp=moment(quote.get('timestamp'))
+            except (SafeError,ValueError,TypeError,OverflowError,OSError):stamp=None
+            if price is not None and price>0 and stamp and stamp<=now+timedelta(minutes=5):
+                row.update(price=str(price),quote_time=stamp.isoformat())
+            if OPTION.fullmatch(ticker) or info.get('board') in {'USOption','USOptionS'}:
+                mult=numeric(option_quotes.get(ticker,{}).get('contract_multiplier'))
+                row['multiplier']=str(mult) if mult is not None and mult>0 else None
+                row['gap']='期权成本单位与真实合约乘数口径未核对，本次不硬算盈亏';partial=True;continue
+            qty,cost=numeric(row['quantity']),numeric(row['cost_price'])
+            if info.get('board') not in spot_boards or not row['currency'] or info.get('currency')!=row['currency'] or qty is None or cost is None or row['price'] is None:
+                partial=True;continue
+            row['pnl']=str((price-cost)*qty);row['gap']=''
+        holdings={'status':'部分完成' if partial else '完整' if rows else '完整但为空','reason':'部分持仓盈亏待核对' if partial else '', 'rows':rows}
+    except (SafeError,KeyError,TypeError,ValueError,InvalidOperation):pass
+    return {'as_of':now.isoformat(),'balances':balances,'holdings':holdings}
 
 
 def collect_account(provider, now, ny):
@@ -454,10 +521,11 @@ def main():
                     account = collect_account(provider, now, ny)
                 except (SafeError, ValueError, KeyError, TypeError, InvalidOperation, OverflowError):
                     account["reason"] = "成交或交易日期查询未完成"
+                snapshot = collect_snapshot(provider, now)
                 ipo = collect_ipo(provider, now)
                 write_json(root / "account.json", {
                     "schema": "longbridge-assistant.account.v1", "generated_at": now.isoformat(),
-                    "account": account,
+                    "account": account, "snapshot": snapshot,
                 })
                 public = {
                     "schema": "longbridge-assistant.public.v1", "mode": "daily",
@@ -465,7 +533,7 @@ def main():
                 }
                 input_path = root / "analysis-input.json"
                 write_json(input_path, public)
-                status = {"account_status": account["status"], "ipo_status": ipo["status"]}
+                status = {"account_status": account["status"], "balances_status": snapshot["balances"]["status"], "holdings_status": snapshot["holdings"]["status"], "ipo_status": ipo["status"]}
         print(json.dumps({
             "status": "collected", "output_root": str(root),
             **status, "analysis_input": str(input_path),
