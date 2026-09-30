@@ -1,6 +1,6 @@
 # Longbridge Assistant（长桥助手）PRD
 
-版本：v1.2 实施版（公开文档）
+版本：v1.3 实施版（公开文档）
 日期：2026-09-30
 产品方向：用户已授权开始实施，并指定公开仓库、通用且简易的 Skill 安装。
 本稿为公开产品需求，移除本机身份诊断及私有运行记录；具体交付证据见发布说明。
@@ -16,7 +16,7 @@
 **名称：** Longbridge Assistant / 长桥助手。
 **Skill 标识：** `longbridge-assistant`。
 **公开仓库：** `archerthegoat/longbridge-assistant`。
-**交付形态：** 一个 Skill、少量必要脚本、固定 HTML 模板。通过现成 skills CLI 安装到所用 Agent。
+**交付形态：** 一个助手 Skill、少量必要脚本、固定 HTML 模板。通过现成 skills CLI 安装到所用 Agent，同时安装官方基础 Skill `longbridge` 并验证 CLI 连接。
 
 ### 1.1 需求依据与原型
 
@@ -28,6 +28,7 @@
 - 打新快评采用简版：估值、行业与公司竞争力、可核实的风险红旗；热度辅助。
 - 点击新股进入独立子页，直接阅读已生成的简短结论。
 - 新 Skill 接替旧 `daily-trade-journal` 的每日入口。旧日记、计划及历史记录保留。
+- 初始化必须同时安装长桥官方 `longbridge` Skill 并完成连接验证；两个 Skill 在同一 Agent 可发现。采用通用显式初始化流程，首次使用检查作为补充。
 
 原型采用已确认的 B 版首页和简版 IPO 子页。实现保留该信息顺序和交互；演示数据与真实报告分开。
 
@@ -229,19 +230,21 @@
 
 ### 6.1 单一长桥来源
 
-每日任务调用 `longbridge-assistant`，由它通过长桥的只读工具/CLI 获取数据。首版自包含完成编排，避免依赖另某个特定 Agent 专属 Skill。这仍遵守“日常只使用长桥数据”的要求。
+每日任务调用 `longbridge-assistant`，由它通过长桥的只读 CLI 获取数据。安装依赖为官方仓库 `longbridge/skills` 中的基础 Skill `longbridge`，用于设置与基础能力参考。两个 Skill 安装到同一 Agent，并完成安全 CLI 连接验证；无需安装全部官方兄弟 Skill 或某个 Agent 专属插件。
+
+日报以本 PRD 与助手限定的采集器为准。官方基础 Skill 的广泛资产读取、外部搜索等默认行为不能扩大助手的读取范围或数据来源；不读取余额、购买力、净值、盈亏或结单，也不自动执行交易操作。
 
 来源内容可保留长桥给出的发行人或公告链接。自动化不在缺字段时静默改用搜索引擎、其他行情商或第二套研究 Skill。若长桥提供不了某项，按缺口交付。
 
 ### 6.2 2026-09-30 能力核查记录
 
-本机查到 `longbridge 0.28.0`。以下仅核对了本机帮助信息和旧代码，未在本轮读取账户或实际 IPO 数据。
+本机查到 `longbridge 0.28.0`。已核对帮助与对应官方源码，并用受控子进程成功查询公开美股交易日历。官方基础 Skill 已通过安装器只列出模式确认可发现，尚未实际安装；未在本轮读取账户或实际 IPO 数据。
 
 | 需要的能力 | 已观察到的接口入口 | 当前证据与实施门槛 |
 | --- | --- | --- |
 | 历史成交 | `api.get /v3/trade/execution/all`，显式 page/has_more 分页 | 入口存在；官方合同已核对方向与分页；完整性、成交日归属和实际权限仍需实测 |
 | 当前持仓 | `positions`；旧采集器使用 `trade.stock_positions` | 入口存在；最小投影及期权标的归属需核验 |
-| 交易日历 | `trading days` / `trading session` | 入口存在；休市、半日市和夜盘边界需核验 |
+| 交易日历 | `quote.trading_days` / `trading session` | 公开日历连接查询成功；休市、半日市和夜盘边界仍需行为核验 |
 | 新闻与日程 | `news`、`finance-calendar`、`filing` | 入口存在；时间窗口、历史覆盖、来源链接与访问权限需核验 |
 | IPO 名单和日程 | `ipo subscriptions`、`wait-listing`；`api.get` 的 IPO profile/timeline | 入口存在；有效截止时间、定价字段、热度及实际权限需核验 |
 | 业务和财务 | `company`、`financial-report`、`business-segments`、`valuation` 等 | 入口存在；对未上市发行人的覆盖不能预设可用 |
@@ -274,7 +277,8 @@ longbridge-assistant/
         │   ├── collect.py        长桥只读适配、窗口与数据投影
         │   └── render.py         金额汇总与静态页面生成
         ├── references/
-        │   └── data-contract.md  状态、单位、来源与私有输出契约
+        │   ├── setup.md          双 Skill 安装、发现与安全连接验证
+        │   └── workflow.md       状态、单位、来源与私有输出契约
         └── assets/
             ├── daily.html       首页模板
             └── ipo.html         快评模板
@@ -298,7 +302,7 @@ longbridge-assistant/
 ### 7.3 构建步骤
 
 1. 冻结本 PRD 的批准版本和最终两份原型，去除比较版/模拟交互。
-2. 按 Agent Skills 标准准备一个 Skill 骨架，填写清晰的触发范围及 `openai.yaml`。
+2. 按 Agent Skills 标准准备助手骨架，填写清晰触发范围及 `openai.yaml`；将双 Skill 安装、同一 Agent 发现与安全 CLI 连接验证写成完整初始化流程。
 3. 以最小只读接口接入账户、事件和 IPO；先查输出字段、权限和覆盖，再编写转换逻辑。
 4. 建立公开分析输入与私有成交展示之间的边界，处理真实日期、金额和完整性。
 5. 生成首页与 IPO 子页，保留模块失败状态与来源。
@@ -344,15 +348,22 @@ HTML 内嵌展示所需内容，子页用相对链接，默认直接离线打开
 
 采用标准 Agent Skills 格式，主入口为 `skills/longbridge-assistant/SKILL.md`。辅助脚本、引用、模板随整个 Skill 文件夹安装；`agents/openai.yaml` 是可选的 Codex 元数据。
 
-主安装命令：
+完整初始化先安装官方基础 Skill，再安装助手；两次选择同一 Agent 和相同安装范围：
 
 ```bash
+npx skills add longbridge/skills --skill longbridge --global
 npx skills add archerthegoat/longbridge-assistant --skill longbridge-assistant --global
 ```
 
-使用 [Vercel skills CLI](https://github.com/vercel-labs/skills) 交互选择 Agent。`--global` 为个人安装，省略则为项目安装。当前安装器 skills 1.7.0 要求 Node ≥22.20.0；运行脚本使用 Python 3.10+、IANA 时区数据、长桥 CLI 与用户已有有效授权。
+使用 [Vercel skills CLI](https://github.com/vercel-labs/skills) 交互选择 Agent。`--global` 为个人安装，省略则为项目安装。当前安装器 skills 1.7.0 要求 Node ≥22.20.0；运行脚本使用 Python 3.10+、IANA 时区数据、长桥 CLI 0.28.0 与用户已有有效授权。安装器不会自动安装 Skill 依赖或授权长桥。
 
-无需 Node 时可下载仓库，将完整 Skill 文件夹置于所用 Agent 的发现目录。固定版本、更新和具体操作见 README。安装器支持与实际 Agent 运行核验分别记录；默认分支存在 Skill 后才声明主安装命令可用。
+安装完成后核对当前 Agent 可发现 `longbridge` 和 `longbridge-assistant`；如需重新加载，按所用 Agent 的机制处理。复用现有有效登录，缺失时通过官方 `longbridge auth login` 流程授权。执行 `collect.py --check-connection`，仅查询公开交易日历，不调用会额外读取账户和结单的 `auth status`。
+
+初始化完成条件是两个 Skill 在同一 Agent 可发现、CLI 版本正确、安全公开查询成功。公开查询成功不证明账户、事件与 IPO 权限；这些能力仍按第 12 节分别验证。MCP 与 CLI 连接分别记录，不能互相冒充就绪。
+
+首次使用再次核对前提；定时任务缺依赖时报告未就绪，不无人值守安装或重新登录。Agent Skills 标准没有统一安装后 hook，已核查的 skills 1.7.0 无可依赖的 postinstall hook；首版使用显式初始化流程，不引入自建 npm 包或多个 Agent 的 hook。
+
+无需 Node 时可下载两个仓库，将两个完整 Skill 文件夹置于同一 Agent 的发现目录，并完成相同连接验证。固定版本、更新和具体操作见 README。只操作精确 Skill 名称，禁止采用会清除全部 `longbridge-*` 的批量重装步骤，以免误删助手。安装器支持与实际 Agent 运行核验分别记录；默认分支存在 Skill 后才声明主安装命令可用。
 
 新 Skill 通过真实只读验证后，再通过可恢复方式停用旧日常入口。停用前查实际安装副本、别名和调度引用，保留历史记录；新 Skill 与相关配置精确差异批准后应用。
 
@@ -437,7 +448,7 @@ git ls-remote origin refs/heads/codex/longbridge-assistant
 | AC-14 | 旧报告与断点恢复 | 旧数据保留旧时间；中断保留最近成功页面；失败模块不推进成功游标 |
 | AC-15 | 单一来源与最小读取 | 日常数据来自长桥；没有多余资产读取、下单或静默外部数据补源 |
 | AC-16 | 隐私与日志 | 精确成交只进私有输出；Git、模型输入、普通日志和通知无敏感明细或凭据 |
-| AC-17 | 首次安装与更新 | 固定版本可被发现并调用；只有一个新 Skill 入口；更新失败可回退 |
+| AC-17 | 首次安装与更新 | 同一 Agent 可发现官方 `longbridge` 与助手，CLI 版本符合要求且安全公开查询成功；公开连接与账户权限分开记录；只更新指定 Skill，失败可回退 |
 | AC-18 | Git 身份与远端 | author/committer 使用确认邮箱；账号、owner、目标 remote 正确；交付 SHA 在远端可验证 |
 | AC-19 | 自动化切换 | 仅一个有效每日任务，时间/提示词/状态读回正确，实际运行产生可打开报告 |
 | AC-20 | 原型与正式数据 | 演示、静态检查、真实集成、人类验收分开；真实页面不混入合成样例 |
@@ -473,6 +484,9 @@ git ls-remote origin refs/heads/codex/longbridge-assistant
 - 本对话中已确认的产品选择及用户本地保存的两份 HTML 原型，基线散列见第 1.1 节；原型未作为真实报告发布。
 - 既有用户流程仅用于本地迁移参考；不携带历史账户数据。
 - 本机 Longbridge CLI 0.28.0 帮助信息：确认命令存在，不证明数据权限或真实字段可用。
+- [长桥官方 Skill 入口](https://open.longbridge.com/skill)与[已核查基础 Skill](https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge)：来源、名称和安装入口；2026-09-30 安装器只列出模式确认基础 Skill 可发现，未安装。
+- 同日受控公开日历查询成功：仅证明本机 CLI 连接，账户、事件及 IPO 权限未由该查询证明。
+- [Agent Skills 规范](https://agentskills.io/specification)：未定义统一安装后 hook；核查 skills 1.7.0 实现及[安装后 hook 功能请求](https://github.com/vercel-labs/skills/issues/1155)，据此选择显式初始化。
 - 当前本机 `skill-creator`、`skills CLI` 说明及安装脚本 `--help`：核对结构、固定版本与目标路径参数。
 - 实施遵循适用 AGENTS.md 与 mars-dev/advisor；审批、实际交付和人类验收分别记录。
 - [Agent Skills 标准与 OpenAI Skill 文档](https://learn.chatgpt.com/docs/build-skills)：结构、发现路径、安装与更新行为；查阅日期 2026-09-30。本文采用用户指定的独立 Skill 形态。
