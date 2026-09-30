@@ -1,58 +1,44 @@
 # 安装与连接
 
-## 完整初始化
+## 安装助手
 
-初始化完成需要：同一 Agent 可发现官方基础 Skill longbridge 与 longbridge-assistant，CLI 版本为已适配的 0.28.0，安全公开查询成功。当前 Agent 的 Skill 列表是发现依据；仅找到文件时仍需按该 Agent 的方式加载。安装器不会自动递归安装依赖或完成授权。
+使用标准 Agent Skills 安装器，选择所用 Agent 和安装范围：
 
-1. 使用标准安装器，两次选择同一个 Agent、同一种范围。已有同名官方 Skill 时先核对来源与发现结果后复用。
-
-~~~bash
-npx skills add longbridge/skills --skill longbridge --global
+```bash
 npx skills add archerthegoat/longbridge-assistant --skill longbridge-assistant --global
-~~~
+```
 
---global 为个人安装，省略则为项目安装。Node/npm/npx 只用于安装；无需发布自己的 npm 包。没有 Node 时下载两个仓库，将两个完整 Skill 文件夹放进同一 Agent 的发现目录，保留相对结构。
+--global 为个人安装，省略则为项目安装。main 尚无 Skill 时使用 README 的已核验固定提交入口。无需自建 npm 包；没有 Node 时下载仓库，将完整 skills/longbridge-assistant 文件夹放进 Agent 的 Skill 目录。核对当前 Agent 已发现助手，必要时按其机制重新加载。
 
-2. 按官方基础 Skill 的 references/setup.md 设置 CLI。脚本适配 Longbridge CLI 0.28.0；其他版本先核对接口和日志合同，不自动接受升级版本。macOS 的官方入口：
+## 长桥能力
 
-~~~bash
+- 已授权 Longbridge 插件：直接复用，公开 IPO/新闻查询成功即记录该插件对应能力可用；不要求另外安装官方基础 Skill，不重复登录。
+- 其他 Agent：可选安装官方基础 Skill longbridge 作为连接设置参考。插件、官方基础 Skill 与本助手是不同组件；安装 Skill 不自动产生券商授权。
+- 本版私有账户日报：仍使用 Longbridge CLI 0.28.0、Python 3.10+、IANA 时区数据及 macOS/Linux。此本地通道使精确成交无需经过模型即可生成 HTML。已有 CLI 有效登录直接复用。
+
+需要设置 CLI 时使用官方安装及登录流程：
+
+```bash
 brew install --cask longbridge/tap/longbridge-terminal
 longbridge auth login
-~~~
+```
 
-已有有效登录时直接复用，不重复授权、不退出登录、不迁移凭据。需要授权时按官方流程由用户完成；凭据不写入 Skill、HTML、Git、模型输入或日志。MCP 与 CLI 的认证分别记录，已有 MCP 连接不能作为 CLI 已就绪的证据。
+凭据不写入 Skill、HTML、Git、模型或日志。插件授权与 CLI 登录分别核实；有一个可用不能推断另一个可用。首次初始化及版本变化时，用实际安装路径替换 SKILL_DIR：
 
-3. 用本助手的受控子进程验证连接，以实际安装目录替换 SKILL_DIR：
-
-~~~bash
+```bash
 python3 SKILL_DIR/scripts/collect.py --check-connection
-~~~
+```
 
-该模式只查询最近七天的公开美股交易日历，核对返回结构，不读取持仓、成交、IPO 或结单，不直接检查或回传认证文件，不改写每日报告和事件游标；保留受控私有临时目录、日志关闭及超时约束。不要使用 auth status 代替，该命令会额外读取账户和结单。
+公开日历检查不读取成交或结单；账户权限由正式采集确认。不用 auth status 做预检。CLI 不可用时可继续用插件做公开新股快评，账户模块标未就绪。定时运行不自行安装、重新登录、删除副本或改 hook。
 
-成功返回 connection_check=PASS、account_capability=NOT_CHECKED。账户、事件和 IPO 权限由正式采集分模块确认；不能把公开连接成功写成全部账户能力已就绪。失败只报告安全原因，先核对 CLI 版本、网络和官方连接说明，不自动重新登录。需要诊断时不把原始错误或账户响应输出到模型上下文。
+## 更新与范围
 
-## 首次使用与定时运行
+```bash
+npx skills update longbridge-assistant --global
+```
 
-首次使用和安装版本变更后重复上述发现与公开连接检查。初始化可以由一句用户请求启动：初始化长桥助手，同时安装官方 longbridge Skill，并验证连接。对每一步报告已完成或未完成；授权与当前环境权限规则继续适用。
+更新前保存私有输出，回退使用先前验证的固定提交。可选的官方基础 Skill 单独更新；不要批量清除 longbridge-*。Agent Skills 没有统一安装后 hook，首版使用显式初始化，不声称安装会自动授权。
 
-已初始化的日常运行仍确认两个 Skill 在当前 Agent 可发现，并由采集器核对 CLI 版本及各模块读取状态。定时运行缺依赖时报告未就绪并停止，不自行安装、授权、删除副本或修改 hook。
+账户采集仍按本助手限定的只读接口执行；公开研究可用长桥插件 news_search/news_detail。官方通用建议不扩大账户读取，不额外获取余额、购买力、净值、盈亏、结单或交易接口。
 
-采用显式初始化流程。Agent Skills 标准没有统一的安装后 hook 协议，核查的 skills 1.7.0 也没有可依赖的 postinstall hook。不要宣称仅安装助手就会自动安装官方依赖和完成登录。
-
-## 固定版本、更新与范围
-
-已核查官方基础 Skill 提交为 03c5fde151fb5e16d1ddd5088a06d299d9971eb8；需要复现时按 README 的具体提交安装。更新只选择精确名称：
-
-~~~bash
-npx skills update longbridge longbridge-assistant --global
-~~~
-
-不要运行清除 longbridge 或全部 longbridge-* 的批量重装脚本，它会包含本助手。更新后重新核对发现、CLI 兼容性和连接；保存私有输出，回退用先前已验证提交。
-
-官方 Skill 提供基础能力与设置参考；本助手的只读采集器、单一长桥来源和最小数据范围继续约束日报。不要因官方通用建议额外读取余额、购买力、净值、盈亏、结单或下单接口，不使用 WebSearch/其他数据商填补资料。官方兄弟 Skill 不是本助手的必装项。
-
-[官方 Skill 入口](https://open.longbridge.com/skill)
-· [官方基础 Skill 固定来源](https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge)
-· [CLI 官方设置](https://github.com/longbridge/skills/blob/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge/references/setup.md)
-· [Agent Skills 规范](https://agentskills.io/specification)
+[CLI 官方安装](https://open.longbridge.com/docs/cli/install) · [可选官方基础 Skill](https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge) · [Agent Skills 规范](https://agentskills.io/specification)

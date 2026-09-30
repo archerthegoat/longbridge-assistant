@@ -70,44 +70,7 @@ def totals(rows, side):
     return copy or ("未提供" if missing else "—")
 
 
-def event_html(item, summary):
-    return (
-        f'<article class="event"><div class="meta">{e(item["symbol"])}<br>{e(item["time"])}{"（具体时刻未核验）" if item.get("date_only") else ""}</div>'
-        f'<div><h3>{e(item["title"])}</h3><p>{e(summary or item.get("summary") or "请查看来源资料")}</p>'
-        f'<div class="source">{" / ".join(e(reason) for reason in item.get("relation", []))} · {"未来日程" if item.get("kind") == "calendar" else "已发布"} · {link(item.get("source", "Longbridge"), item.get("url"))}</div></div></article>'
-    )
-
-
-def events_html(data, analysis):
-    by_id = {item["id"]: item for item in data["rows"]}
-    selected, seen = [], set()
-    screened = isinstance(analysis.get("events"), list)
-    for item in analysis.get("events", []) if screened else []:
-        if isinstance(item, dict) and item.get("id") in by_id and item["id"] not in seen:
-            selected.append((by_id[item["id"]], item.get("summary", "")))
-            seen.add(item["id"])
-    if not screened:
-        selected = [(item, "") for item in sorted(data["rows"], key=lambda row: row["time"], reverse=True)]
-    shown = "".join(event_html(item, summary) for item, summary in selected[:5])
-    if len(selected) > 5:
-        shown += '<details><summary>其余相关事件</summary>' + "".join(event_html(item, summary) for item, summary in selected[5:]) + "</details>"
-    if not shown:
-        copy = "在本次已取得资料中未筛出重要相关事件" if screened else "事件采集或关注范围未完整取得"
-        if not screened and data["status"] == "完整但为空":
-            copy = "本次完整窗口暂无相关事件资料"
-        shown = f'<p class="empty">{copy}</p>'
-    note = data.get("reason", "")
-    if not screened:
-        note = (note + "；尚未完成事件精选，以下为取得的来源资料").strip("；")
-    reason = f'<p class="note">{e(note)}</p>' if note else ""
-    return (
-        '<section class="panel" id="events"><div class="panel-head"><div><h2>相关事件</h2>'
-        f'<div class="meta">{e(data.get("window_start"))} 至 {e(data.get("window_end"))}</div></div>{pill(data["status"])}</div>'
-        f'<div class="content">{reason}{shown}</div></section>'
-    )
-
-
-def account_html(data, positions, previous_date):
+def account_html(data, previous_date):
     rows = data["rows"]
     groups = defaultdict(list)
     for row in rows:
@@ -148,14 +111,12 @@ def account_html(data, positions, previous_date):
     sell_total = totals(rows, "Sell") if complete or rows else "未取得"
     repeated = " · 与上次相同交易日" if previous_date and data.get("date") == previous_date else ""
     reason = f'<p class="note">{e(data["reason"])}</p>' if data.get("reason") else ""
-    tags = "".join(f"<span>{e(item)}</span>" for item in positions.get("symbols", []))
     return (
-        '<section class="panel" id="account"><div class="panel-head"><div><h2>账户简报与成交明细</h2>'
+        '<section class="panel" id="account"><div class="panel-head"><div><h2>仓位操作简报与成交明细</h2>'
         f'<div class="meta">US · {e(data.get("date") or "交易日未确定")}{e(repeated)}<br>{e(data.get("coverage"))}</div></div>{pill(data["status"])}</div>'
         f'<div class="content">{reason}<div class="stats"><div class="stat"><span class="meta">成交 / 标的{e(subtotal)}</span><strong>{e(count)}</strong></div>'
         f'<div class="stat"><span class="meta">买入成交额{e(subtotal)}</span><strong>{buy_total}</strong></div>'
         f'<div class="stat"><span class="meta">卖出成交额{e(subtotal)}</span><strong>{sell_total}</strong></div></div>'
-        f'<div class="meta">当前持仓关联范围 · {e(positions["status"])}</div><div class="tags">{tags}</div>'
         f'{details}</div></section>'
     )
 
@@ -206,47 +167,69 @@ def ipo_order(item, generated_at):
     return phase, parsed.timestamp() if parsed else float("inf"), item["symbol"]
 
 
+def ipo_source_urls(item, judgment):
+    profile = item.get("profile", {})
+    allowed = {profile[key] for key in ["prospectus", "recommend_url"]
+               if isinstance(profile.get(key), str) and safe_url(profile[key])}
+    for source in judgment.get("sources", []):
+        if not isinstance(source, dict) or source.get("provider") != "Longbridge":
+            continue
+        url = safe_url(source.get("url"))
+        if not url or not isinstance(source.get("title"), str) or not source["title"].strip():
+            continue
+        parsed = urlsplit(url)
+        try:
+            port = parsed.port
+        except ValueError:
+            continue
+        if parsed.scheme != "https" or parsed.hostname != "longbridge.com" or port not in {None, 443}:
+            continue
+        if not re.fullmatch(r"/news/[0-9]+(?:\.md)?", parsed.path) or parsed.query or parsed.fragment:
+            continue
+        try:
+            published = datetime.fromisoformat(str(source.get("time")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if published.tzinfo is not None:
+            allowed.add(url)
+    return allowed
+
+
 def ipo_analysis(item, analysis):
     rows = analysis.get("ipo", [])
     result = next((row for row in rows if isinstance(row, dict) and row.get("symbol") == item["symbol"]), {})
     if result.get("conclusion") not in VERDICTS:
         return {"conclusion": "资料不足", "summary": "尚未完成有来源的短线初筛。"}
     if result["conclusion"] == "可以关注":
-        profile = item.get("profile", {})
-        urls = {profile[key] for key in ["prospectus", "recommend_url"]
-                if isinstance(profile.get(key), str) and safe_url(profile[key])}
+        urls = ipo_source_urls(item, result)
         evidence_status = result.get("evidence_status", {})
-        core_gaps = result.get("core_gaps")
-        verified = isinstance(evidence_status, dict) and all(evidence_status.get(key) == "已核对"
-                    for key in ["valuation", "competitiveness", "red_flags"])
-        verified = verified and isinstance(core_gaps, list) and not core_gaps
+        supported = isinstance(evidence_status, dict) and all(evidence_status.get(key) == "已核对"
+                    for key in ["valuation", "competitiveness"])
         sources = result.get("sources", [])
         sourced = isinstance(sources, list) and any(isinstance(row, dict) and row.get("url") in urls for row in sources)
-        if not profile or not sourced or not verified or any(not isinstance(result.get(key), str) or not result[key].strip()
-                                            for key in ["valuation", "competitiveness", "red_flags"]):
-            return {**result, "conclusion": "资料不足", "summary": "核心事实尚未全部核对或仍有缺项，暂不形成积极初筛。"}
+        if not sourced or not supported or any(not isinstance(result.get(key), str) or not result[key].strip()
+                                               for key in ["valuation", "competitiveness", "red_flags"]):
+            result = {**result, "conclusion": "偏谨慎", "summary": "积极判断的估值或业务支持不足，先保留谨慎初筛；未知项见下文。"}
     return {**result, "analysed_at": analysis.get("analysed_at")}
 
 
 def ipo_page(item, judgment, generated_at, back="../index.html#ipo"):
     keys = [("valuation", "估值"), ("competitiveness", "竞争力"), ("red_flags", "风险红旗")]
     checks = "".join(f'<section class="check"><h2>{title}</h2><p>{e(judgment.get(key) or "核心资料尚未取得或核对")}</p></section>' for key, title in keys)
-    allowed = set()
-    profile = item.get("profile", {})
-    for key in ["prospectus", "recommend_url"]:
-        if isinstance(profile.get(key), str) and safe_url(profile[key]):
-            allowed.add(profile[key])
-    sources = "".join("<li>" + link(source.get("title") or "资料来源", source["url"]) + "</li>"
+    allowed = ipo_source_urls(item, judgment)
+    sources = "".join("<li>" + link(source.get("title") or "资料来源", source["url"]) + " · " + e(source.get("time") or "时间见原文") + "</li>"
                       for source in judgment.get("sources", []) if isinstance(source, dict) and source.get("url") in allowed)
     if not sources:
         sources = "".join("<li>" + link("长桥提供的发行资料", url) + "</li>" for url in sorted(allowed))
+    gaps = judgment.get("core_gaps", [])
+    gaps_text = "；".join(str(value) for value in gaps) if isinstance(gaps, list) else ""
     heat = judgment.get("heat") or ("长桥预计认购参考：" + item["heat"] + "（非全市场最终倍数）" if item.get("heat") else "热度资料未取得")
     return (
         (f'<a href="{e(back)}">← 返回打新提醒</a>' if back else "") +
         f'<h1>{e(item["name"])}</h1><div class="meta">{e(item["symbol"])} · 资料采集时间 {e(item.get("profile_time") or generated_at)} · 分析时间 {e(judgment.get("analysed_at"))}</div>'
         f'<div class="verdict">{pill(judgment["conclusion"])}<p>{e(judgment.get("summary") or "暂无足够依据")}</p></div>'
         f'{checks}<p class="meta">{e(heat)}</p><details class="sources"><summary>来源与资料缺口</summary>'
-        f'<ul>{sources or "<li>长桥尚未提供可用原文链接</li>"}</ul><p class="meta">{e(item.get("gap") or "仅在已取得资料范围内判断；发行估值与经营资料覆盖仍需核对")}</p>'
+        f'<ul>{sources or "<li>长桥尚未提供可用原文链接</li>"}</ul><p class="meta">{e("；".join(value for value in [item.get("gap"), gaps_text] if value) or "仅依据已取得公开资料初筛，未做完整财务尽调")}</p>'
         '<p class="meta">资料中的日期与范围请一并核对；申购费、融资利息与交易费用会影响净收益。</p></details>'
     )
 
@@ -309,9 +292,8 @@ def render(root, account, public, analysis):
             + "</div></section>"
         )
         demo = '<div class="demo">合成演示数据 · 非真实账户或投资结论</div>' if public.get("demo") else ""
-        body = demo + '<h1>今日简报</h1><p class="meta">相关事件、上一完成交易日的成交与港股新股日程</p>'
-        body += events_html(public["events"], analysis)
-        body += account_html(account["account"], account["positions"], previous.get("account_date"))
+        body = demo + '<h1>今日简报</h1><p class="meta">上一完成交易日的仓位操作与港股打新提示</p>'
+        body += account_html(account["account"], previous.get("account_date"))
         body += ipo_section
         write_text(target / "index.html", page("今日简报", body, generated_at))
         write_json(target / ".manifest.json", {"owner": "longbridge-assistant", "generated_at": generated_at})
@@ -331,10 +313,6 @@ def render(root, account, public, analysis):
             raise
     account_date = account["account"].get("date") if account["account"]["status"] in {"完整", "完整但为空"} else previous.get("account_date")
     state = {"account_date": account_date, "generated_at": generated_at}
-    if public["events"]["status"] in {"完整", "完整但为空"}:
-        state["events_through"] = public["events"].get("window_end")
-    elif previous.get("events_through"):
-        state["events_through"] = previous["events_through"]
     write_json(root / "state.json", state)
     return root / "current" / "index.html"
 

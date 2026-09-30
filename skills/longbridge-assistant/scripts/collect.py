@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone, time
 from decimal import Decimal, InvalidOperation
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -24,11 +23,10 @@ SYMBOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.(US|HK|CN|SG)$")
 OPTION = re.compile(r"^[A-Za-z0-9_.-]+[0-9]{6}[CP][0-9]+\.US$")
 READ_METHODS = {
     "quote.trading_days", "quote.trading_session", "quote.static_info",
-    "quote.option_quote", "trade.stock_positions", "trade.order_detail",
+    "quote.option_quote", "trade.order_detail",
 }
 READ_PATHS = {
     "/v3/trade/execution/all", "/v1/ipo/profile", "/v1/ipo/timeline",
-    "/v1/quote/finance_calendar",
 }
 ENV_KEYS = {
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "LANG",
@@ -141,16 +139,8 @@ class Provider:
         params = params or {}
         if method == "api.get":
             path = params.get("path", "")
-            if path not in READ_PATHS and not re.fullmatch(r"/v1/content/[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.(US|HK|CN|SG)/news", path):
+            if path not in READ_PATHS:
                 raise SafeError("read_path_not_allowed")
-        elif method == "api.post":
-            if params.get("path") != "/v1/quote/symbol-to-counter-ids":
-                raise SafeError("read_path_not_allowed")
-            body = params.get("body")
-            if not isinstance(body, dict) or set(body) != {"ticker_regions"} or not isinstance(body["ticker_regions"], list):
-                raise SafeError("identity_query_invalid")
-            for ticker in body["ticker_regions"]:
-                symbol(ticker)
         elif method not in READ_METHODS:
             raise SafeError("read_method_not_allowed")
         self.serial += 1
@@ -346,152 +336,6 @@ def collect_account(provider, now, ny):
     )
 
 
-def collect_positions(provider):
-    data = provider.call("trade.stock_positions")
-    if not isinstance(data, dict) or not isinstance(data.get("list"), list):
-        raise SafeError("positions_schema")
-    result, options, unresolved = set(), set(), False
-    for channel in data["list"]:
-        if not isinstance(channel, dict) or not isinstance(channel.get("stock_info"), list):
-            unresolved = True
-            continue
-        for item in channel["stock_info"]:
-            try:
-                ticker = symbol(item["symbol"])
-                qty = Decimal(str(item["quantity"]))
-                if not qty.is_finite():
-                    raise SafeError("position_quantity_invalid")
-                if qty == 0:
-                    continue
-                if OPTION.fullmatch(ticker):
-                    options.add(ticker)
-                else:
-                    result.add(ticker)
-            except (SafeError, InvalidOperation, KeyError, TypeError, ValueError):
-                unresolved = True
-    if options:
-        try:
-            quotes = mapping(provider.call("quote.option_quote", {"symbols": sorted(options)}))
-            for ticker in options:
-                try:
-                    result.add(symbol(quotes[ticker]["underlying_symbol"]))
-                except (SafeError, KeyError, ValueError, TypeError):
-                    unresolved = True
-        except (SafeError, KeyError, TypeError, ValueError):
-            unresolved = True
-    return module("部分完成" if unresolved else "完整", "部分持仓身份或期权归属未取得" if unresolved else "", symbols=sorted(result))
-
-
-def collect_events(provider, tickers, start, now):
-    rows, seen, gaps = [], {}, []
-    identities = {}
-    if tickers:
-        try:
-            raw = provider.call("api.post", {"path": "/v1/quote/symbol-to-counter-ids", "body": {"ticker_regions": tickers}})
-            identities = raw.get("list", {}) if isinstance(raw, dict) else {}
-            if not isinstance(identities, dict):
-                identities = {}
-        except (SafeError, TypeError, ValueError):
-            gaps.append("公司日程证券身份未核验")
-    def add(ticker, item, kind):
-        if not isinstance(item, dict):
-            raise SafeError("event_schema")
-        date_only = False
-        value = item.get("published_at") if kind == "news" else item.get("datetime") or item.get("date")
-        try:
-            stamp = moment(value)
-            if not (start <= stamp <= now if kind == "news" else now <= stamp <= now + timedelta(days=7)):
-                return
-            when = stamp.isoformat()
-        except SafeError:
-            if kind == "news":
-                raise
-            date = datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
-            if not now.date() <= date <= (now + timedelta(days=7)).date():
-                return
-            date_only, when = True, date.isoformat()
-            gaps.append("部分公司日程仅核对日期，时刻或时区未取得")
-        title = str(item.get("title") or item.get("content") or "")
-        identity = str(item.get("id") or item.get("url") or "")
-        dedup = identity if kind == "news" and identity else ticker
-        key = hashlib.sha256((kind + dedup + title + when).encode()).hexdigest()[:20]
-        if key in seen:
-            row = seen[key]
-            row["symbols"] = sorted(set(row["symbols"] + [ticker]))
-            row["symbol"] = "、".join(row["symbols"])
-            return
-        if not title:
-            return
-        row = {
-            "id": key, "symbol": ticker, "symbols": [ticker], "title": title,
-            "summary": str(item.get("description") or ""), "time": when,
-            "date_only": date_only, "url": item.get("url"),
-            "source": str(item.get("source") or "Longbridge"), "kind": kind,
-        }
-        seen[key] = row
-        rows.append(row)
-    for ticker in tickers:
-        try:
-            data = provider.get(f"/v1/content/{ticker}/news")
-            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
-                raise SafeError("news_schema")
-            stamps = []
-            for item in data["items"]:
-                try:
-                    stamps.append(moment(item.get("published_at")))
-                    add(ticker, item, "news")
-                except (ValueError, SafeError, TypeError, OverflowError, OSError):
-                    gaps.append("新闻时间字段未取得")
-            if not stamps or min(stamps) > start:
-                gaps.append("最近新闻接口未证明整个窗口覆盖")
-        except (SafeError, KeyError, TypeError, ValueError, AttributeError):
-            gaps.append("部分新闻查询失败")
-        cid = identities.get(ticker)
-        ticker_code, ticker_market = ticker.rsplit(".", 1)
-        expected_code = str(int(ticker_code)) if ticker_market == "HK" and ticker_code.isdigit() else ticker_code
-        parts = cid.split("/") if isinstance(cid, str) else []
-        if len(parts) != 3 or parts[0] not in {"ST", "ETF", "IX", "WT"} or parts[1:] != [ticker_market, expected_code]:
-            gaps.append("部分公司日程证券身份未核验")
-            continue
-        for kind in ["report", "financial", "dividend", "split", "merge"]:
-            date = now.date().isoformat()
-            end_date = (now + timedelta(days=7)).date().isoformat()
-            try:
-                for page in range(20):
-                    data = provider.get("/v1/quote/finance_calendar", {
-                        "date": date, "date_end": end_date, "count": "100", "offset": "0",
-                        "next": "later", "types[]": kind, "counter_ids[]": cid,
-                    })
-                    if not isinstance(data, dict) or not isinstance(data.get("list"), list):
-                        raise SafeError("event_calendar_schema")
-                    for group in data["list"]:
-                        if not isinstance(group, dict) or not isinstance(group.get("infos"), list):
-                            raise SafeError("event_calendar_schema")
-                        for item in group["infos"]:
-                            try:
-                                if isinstance(item, dict) and not item.get("datetime") and not item.get("date"):
-                                    item = {**item, "date": group.get("date")}
-                                add(ticker, item, "calendar")
-                            except (ValueError, SafeError, TypeError, OverflowError, OSError):
-                                gaps.append("部分公司日程时间不完整")
-                    next_date = data.get("next_date")
-                    if not next_date or str(next_date) > end_date:
-                        break
-                    if str(next_date) <= date:
-                        gaps.append("公司日程分页未完成")
-                        break
-                    date = str(next_date)
-                else:
-                    gaps.append("公司日程达到分页上限")
-            except (SafeError, KeyError, TypeError, ValueError, AttributeError):
-                gaps.append("部分公司日程查询失败")
-    return module(
-        "部分完成" if gaps else "完整" if rows else "完整但为空",
-        "；".join(sorted(set(gaps))), rows=rows,
-        window_start=start.isoformat(), window_end=now.isoformat(),
-    )
-
-
 def collect_ipo(provider, now, requested=None):
     items, gaps = {}, []
     if requested:
@@ -606,45 +450,22 @@ def main():
                 status = {"ipo_status": ipo["status"]}
             else:
                 account = module(rows=[], date="", coverage="US 成交查询未完成")
-                positions = module(symbols=[])
                 try:
                     account = collect_account(provider, now, ny)
                 except (SafeError, ValueError, KeyError, TypeError, InvalidOperation, OverflowError):
                     account["reason"] = "成交或交易日期查询未完成"
-                try:
-                    positions = collect_positions(provider)
-                except (SafeError, ValueError, KeyError, TypeError, InvalidOperation):
-                    positions["reason"] = "持仓范围查询未完成"
-                tickers = set(positions["symbols"]) | {row["underlying"] for row in account["rows"] if row["underlying"]}
-                start = moment(account["window_start"]) if account.get("window_start") else now - timedelta(days=4)
-                if (root / "state.json").is_file():
-                    previous = load_json(root / "state.json")
-                    if previous.get("events_through"):
-                        start = moment(previous["events_through"])
-                events = collect_events(provider, sorted(tickers), start, now)
-                traded = {row["underlying"] for row in account["rows"] if row["underlying"]}
-                held = set(positions["symbols"])
-                events["universe"] = [{"symbol": ticker, "relation":
-                    (["当前持仓"] if ticker in held else []) + (["本期成交"] if ticker in traded else [])}
-                    for ticker in sorted(tickers)]
-                for item in events["rows"]:
-                    item["relation"] = sorted({reason for ticker in item["symbols"]
-                        for reason in (["当前持仓"] if ticker in held else []) + (["本期成交"] if ticker in traded else [])})
-                if positions["status"] != "完整" or account["status"] not in {"完整", "完整但为空"}:
-                    events["status"] = "部分完成"
-                    events["reason"] = (events["reason"] + "；关注范围不完整").strip("；")
                 ipo = collect_ipo(provider, now)
                 write_json(root / "account.json", {
                     "schema": "longbridge-assistant.account.v1", "generated_at": now.isoformat(),
-                    "account": account, "positions": positions,
+                    "account": account,
                 })
                 public = {
                     "schema": "longbridge-assistant.public.v1", "mode": "daily",
-                    "generated_at": now.isoformat(), "events": events, "ipo": ipo,
+                    "generated_at": now.isoformat(), "ipo": ipo,
                 }
                 input_path = root / "analysis-input.json"
                 write_json(input_path, public)
-                status = {"account_status": account["status"], "events_status": events["status"], "ipo_status": ipo["status"]}
+                status = {"account_status": account["status"], "ipo_status": ipo["status"]}
         print(json.dumps({
             "status": "collected", "output_root": str(root),
             **status, "analysis_input": str(input_path),
