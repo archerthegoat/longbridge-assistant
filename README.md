@@ -6,7 +6,7 @@
 
 最新需求 v1.5：**仓位操作简报与成交明细 → 打新提示**，取消相关事件和当前持仓读取。打新只做轻量公开搜索，详细财务缺失直接说明。
 
-公开仓库已创建，开发分支 `codex/longbridge-assistant` 的旧版代码提交为 `efd9adcbf205ec7e6635a3966a447ca782b67cb3`。该版已实际生成私有报告，仍有事件功能及旧初始化限制；v1.5 Skill 精确修改待批准，尚未应用。人类验收 PENDING。main 当前只有基础文档，未合并 Skill、未发版。
+已按批准的六文件补丁应用 v1.5，代码提交 `002edc2ace68face621be9bf18e45cdf485958b0`，已推送开发分支 `codex/longbridge-assistant`。Python 3.12.14 / CLI 0.28.0 下本次实际成交和 IPO 采集成功，私有 HTML 已生成并读回两板块、展开结构、来源、链接及权限。CLI 与插件的 IPO 阶段字段有差异，本次页面按公开插件核实结果修正；后续运行仍需核对，未修改 CLI 映射。人类验收 PENDING。main 尚未合并 Skill，未发版；实际安装与定时切换分别待完成。
 
 ## 安装与连接（v1.5 目标流程）
 
@@ -16,10 +16,10 @@
 npx skills add archerthegoat/longbridge-assistant --skill longbridge-assistant --global
 ```
 
-上面的简短命令在 main 交付 Skill 后使用。当前旧版可发现的固定入口：
+上面的简短命令在 main 交付 Skill 后使用。当前已交付的固定代码入口（安装器的该版本发现仍待核对）：
 
 ```bash
-npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/efd9adcbf205ec7e6635a3966a447ca782b67cb3/skills/longbridge-assistant" --skill longbridge-assistant --global
+npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/002edc2ace68face621be9bf18e45cdf485958b0/skills/longbridge-assistant" --skill longbridge-assistant --global
 ```
 
 `--global` 为个人安装，省略为项目安装。Node/npm/npx 仅用于安装，无需发布自己的 npm 包。已核查安装器 1.7.0 要求 Node ≥22.20.0。无 Node 时下载仓库，把完整 `skills/longbridge-assistant` 放入 Agent 的 Skill 目录，保留相对结构。安装器支持范围与实际运行证据分开记录。
