@@ -238,15 +238,17 @@
 
 ### 6.2 2026-09-30 能力核查记录
 
-本机查到 `longbridge 0.28.0`。已核对帮助与对应官方源码，并用受控子进程成功查询公开美股交易日历。官方基础 Skill 已通过安装器只列出模式确认可发现，尚未实际安装；未在本轮读取账户或实际 IPO 数据。
+本机查到 `longbridge 0.28.0`。已核对帮助与对应官方源码；批准的 Skill 代码在 Python 3.12.14 下通过受控子进程完成公开连接检查及一次真实只读采集、私有 HTML 生成。账户模块完整，事件部分完成（最近新闻接口未证明整个窗口覆盖），IPO 名单与发行日程完整。当前 IPO 核心估值、经营竞争力和财务治理资料未充分核对，快评为资料不足。
+
+官方基础 Skill 与助手均通过固定来源的安装器只列出发现，尚未实际安装或确认当前 Agent 可同时发现。上述结果仅对应本次运行：测试套件未新增/未运行，未实际覆盖所有日期、工具或失败场景，人类验收为 PENDING。最初系统 Python 3.9.6 的账户失败记录与最终 3.12.14 运行分别保留；3.9.6 不在声明的运行依赖范围内。
 
 | 需要的能力 | 已观察到的接口入口 | 当前证据与实施门槛 |
 | --- | --- | --- |
-| 历史成交 | `api.get /v3/trade/execution/all`，显式 page/has_more 分页 | 入口存在；官方合同已核对方向与分页；完整性、成交日归属和实际权限仍需实测 |
-| 当前持仓 | `positions`；旧采集器使用 `trade.stock_positions` | 入口存在；最小投影及期权标的归属需核验 |
+| 历史成交 | `api.get /v3/trade/execution/all`，显式 page/has_more 分页 | 本次账户采集完整；其他日期、分页/混合工具与夜盘边界仍需核验 |
+| 当前持仓 | `trade.stock_positions` 最小身份投影 | 已纳入本次事件关联范围；未实际覆盖的工具边界仍需核验 |
 | 交易日历 | `quote.trading_days` / `trading session` | 公开日历连接查询成功；休市、半日市和夜盘边界仍需行为核验 |
-| 新闻与日程 | `news`、`finance-calendar`、`filing` | 入口存在；时间窗口、历史覆盖、来源链接与访问权限需核验 |
-| IPO 名单和日程 | `ipo subscriptions`、`wait-listing`；`api.get` 的 IPO profile/timeline | 入口存在；有效截止时间、定价字段、热度及实际权限需核验 |
+| 新闻与日程 | `news`、`finance-calendar`；`filing` 尚未纳入首版采集 | 本次新闻与公司日程可读取，新闻窗口覆盖不足明确保留；历史覆盖及缺链接等边界仍需核验 |
+| IPO 名单和日程 | `ipo subscriptions`、`wait-listing`；`api.get` 的 IPO profile/timeline | 本次名单/资料/日程采集完整；实际可操作截止与热度单位仍须核对，核心经营财务不足 |
 | 业务和财务 | `company`、`financial-report`、`business-segments`、`valuation` 等 | 入口存在；对未上市发行人的覆盖不能预设可用 |
 
 **已发现的适配差异：** 旧采集器的公开脱敏结果主动剔除精确价格、数量、金额与完整期权身份，不能原样支撑新成交明细。需要保留其最小化读取思路，并新增只在本机私有工件中使用的明细通道。
@@ -486,6 +488,7 @@ git ls-remote origin refs/heads/codex/longbridge-assistant
 - 本机 Longbridge CLI 0.28.0 帮助信息：确认命令存在，不证明数据权限或真实字段可用。
 - [长桥官方 Skill 入口](https://open.longbridge.com/skill)与[已核查基础 Skill](https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge)：来源、名称和安装入口；2026-09-30 安装器只列出模式确认基础 Skill 可发现，未安装。
 - 同日受控公开日历查询成功：仅证明本机 CLI 连接，账户、事件及 IPO 权限未由该查询证明。
+- 同日批准代码 `efd9adcbf205ec7e6635a3966a447ca782b67cb3` 实际只读运行及私有 HTML 读回：模块状态与限制见第 6.2 节；精确成交和人类验收记录留在私有目录。
 - [Agent Skills 规范](https://agentskills.io/specification)：未定义统一安装后 hook；核查 skills 1.7.0 实现及[安装后 hook 功能请求](https://github.com/vercel-labs/skills/issues/1155)，据此选择显式初始化。
 - 当前本机 `skill-creator`、`skills CLI` 说明及安装脚本 `--help`：核对结构、固定版本与目标路径参数。
 - 实施遵循适用 AGENTS.md 与 mars-dev/advisor；审批、实际交付和人类验收分别记录。

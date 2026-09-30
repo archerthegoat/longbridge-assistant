@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-公开仓库已建立，当前为首版开发阶段。README、产品需求和发布说明已提供；Skill 全目录仍待精确差异批准。长桥 CLI 的公开交易日历连接已核验，真实账户、事件与 IPO 接入仍待分模块核验。
+首版 Skill 源码已交付开发分支 `codex/longbridge-assistant`，代码提交为 `efd9adcbf205ec7e6635a3966a447ca782b67cb3`。已在 Python 3.12.14 / Longbridge CLI 0.28.0 下实际生成私有 HTML：账户采集完整，IPO 名单与发行日程完整，事件新闻窗口覆盖不足；当前 IPO 的核心估值与财务分析仍为资料不足。全部人类验收仍为 PENDING。
 
-下面是正式交付后的推荐安装入口。只有仓库默认分支实际包含 Skill 后，该命令才可安装；任务分支验证使用明确提交 SHA，见下文。
+默认分支 `main` 当前只有基础文档，尚未合并 Skill。现在安装请使用下方「固定版本」的已核验提交入口；main 合并后才使用下面的简短仓库入口。安装器发现已通过，实际安装与当前 Agent 同时发现两个 Skill 尚未核验。
 
 ## 安装
 
@@ -69,11 +69,11 @@ npx skills add longbridge/skills --skill longbridge --list
 npx skills add archerthegoat/longbridge-assistant --list
 ```
 
-固定版本验证时，将 `COMMIT_SHA` 替换为发布说明中的完整提交：
+当前已通过安装器只列出发现的固定版本：
 
 ```bash
 npx skills@1.7.0 add "https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge" --skill longbridge --global
-npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/COMMIT_SHA/skills/longbridge-assistant" --skill longbridge-assistant --global
+npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/efd9adcbf205ec7e6635a3966a447ca782b67cb3/skills/longbridge-assistant" --skill longbridge-assistant --global
 ```
 
 更新时只选择这两个 Skill；需固定版本时使用上述具体提交入口。常规更新：
@@ -83,6 +83,8 @@ npx skills update longbridge longbridge-assistant --global
 ```
 
 更新前阅读 [CHANGELOG](CHANGELOG.md)，保存私有输出；需要回退时重新安装先前已验证的固定提交。不要运行清除所有 `longbridge-*` 的批量重装步骤，这会包含 `longbridge-assistant`。
+
+运行前用 `python3 --version` 确认满足 Python 3.10+。本次真实接入使用 3.12.14；macOS 自带的 Python 可能低于要求，不应直接假定满足依赖。其他 Python/Agent 组合仍需各自核验。
 
 ## 使用
 
