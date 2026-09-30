@@ -1,14 +1,16 @@
 # 长桥助手 · Longbridge Assistant
 
-每天看清上一交易日做了什么买卖，以及有哪些港股新股可关注。一个标准 Agent Skill，输出私有、可离线阅读的 HTML。
+每天看清账户金额、当前持仓盈亏、上一交易日的买卖，以及有哪些港股新股可关注。一个标准 Agent Skill，输出私有、可离线阅读的 HTML。
 
 ## 当前状态
 
-最新需求 v1.6：**账户金额/持仓损益/操作明细 → 打新提示**，继续取消相关事件。v1.6 精确补丁待批准；已安装并试跑版本为 v1.5。打新只做轻量公开搜索，详细财务缺失直接说明。
+当前已实施 v1.6：**账户金额/持仓损益/操作明细 → 打新提示**，无相关事件。打新只做轻量公开搜索，详细财务缺失直接说明。
 
-已按批准的六文件补丁应用 v1.5，代码提交 `002edc2ace68face621be9bf18e45cdf485958b0`，已推送开发分支 `codex/longbridge-assistant`。Python 3.12.14 / CLI 0.28.0 下本次实际成交和 IPO 采集成功，私有 HTML 已生成并读回两板块、展开结构、来源、链接及权限。CLI 与插件的 IPO 阶段字段有差异，本次页面按公开插件核实结果修正；后续运行仍需核对，未修改 CLI 映射。人类验收 PENDING。main 尚未合并 Skill，未发版；固定代码已实际安装，九文件校验值与已批准版本一致，安装版试跑成功；新增账户预览为单次私有工件，尚未应用到 Skill。定时替换将按最新 v1.6 范围执行，配置待精确批准。
+批准的六文件补丁已应用，代码 `7caf75204770a2db3f77909ed8418f9217811b7f` 已推送 `codex/longbridge-assistant`，已安装副本九文件与代码一致。Python 3.12.14 / CLI 0.28.0 下真实账户金额、上日成交与 IPO 采集完整，持仓因期权单位未核实为部分完成；正式私有 HTML 已生成，结构、链接与权限读回通过。股票损益按券商成本估算，不能等同纯未实现收益。原定时任务已替换并启用，按用户最新要求每周二至周六上海时间 09:00 运行；首次自动调度尚待观察。人类验收 PENDING，21 项用例绑定本次代码，保留旧版结果。
 
-## 安装与连接（v1.5 目标流程）
+CLI 与插件 IPO 阶段存在差异，本次公开插件核实后修正私有公开输入并保留原快照，CLI 映射未改。main 尚未合并 Skill，未发布 tag/Release；当前 Agent catalog 的安装发现未刷新验证。下列固定代码入口可安装当前交付版本。
+
+## 安装与连接
 
 安装本助手，使用现成 [skills CLI](https://github.com/vercel-labs/skills) 选择所用 Agent：
 
@@ -19,7 +21,7 @@ npx skills add archerthegoat/longbridge-assistant --skill longbridge-assistant -
 上面的简短命令在 main 交付 Skill 后使用。当前已交付的固定代码入口（安装器的该版本发现仍待核对）：
 
 ```bash
-npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/002edc2ace68face621be9bf18e45cdf485958b0/skills/longbridge-assistant" --skill longbridge-assistant --global
+npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/7caf75204770a2db3f77909ed8418f9217811b7f/skills/longbridge-assistant" --skill longbridge-assistant --global
 ```
 
 `--global` 为个人安装，省略为项目安装。Node/npm/npx 仅用于安装，无需发布自己的 npm 包。已核查安装器 1.7.0 要求 Node ≥22.20.0。无 Node 时下载仓库，把完整 `skills/longbridge-assistant` 放入 Agent 的 Skill 目录，保留相对结构。安装器支持范围与实际运行证据分开记录。
@@ -41,18 +43,18 @@ python3 SKILL_DIR/scripts/collect.py --check-connection
 
 ## 每日输出
 
-1. **仓位操作简报与成交明细**：最近完成美股交易日，按标的分开显示买入、卖出、笔数和成交额，展开实际工具和逐笔数据；支持正股与期权。v1.6 将在同一板块新增券商净资产/总现金及当前证券持仓损益；按币种、读取和报价时间展示。
+1. **仓位操作简报与成交明细**：最近完成美股交易日，按标的分开显示买入、卖出、笔数和成交额，展开实际工具和逐笔数据；支持正股与期权。同一板块显示券商净资产/总现金及当前证券持仓损益；按币种、读取和报价时间展示。
 2. **港股打新提示**：多只新股按阶段和关键日期排列，点击阅读简短子页。一句结论、两三条理由、估值粗判断/业务支撑/明显风险、热度参考，来源折叠。
 
 结论为可以关注 / 偏谨慎 / 暂时跳过 / 资料不足。详细财务缺项不自动阻断初筛；不编上涨百分比，不承诺获利。这里只考虑短线参与。
 
-工作日建议周一至周五 09:00（上海）；周一通常汇报上周五，休市回退最近完成交易日。生成本地 HTML，网页不触发模型、联网采集或交易。
+本机任务每周二至周六 09:00（上海）；周六通常汇报美东周五，休市回退最近完成交易日。生成本地 HTML，网页不触发模型、联网采集或交易。
 
 > 用长桥助手更新今天的仓位操作简报和打新提示。
 
 ## 隐私与更新
 
-精确成交只写用户私有目录，默认 `~/.longbridge-assistant/`；输出 `current/index.html` 和 IPO 子页。目录 0700、文件 0600，Git 和通知不包含账户明细。持仓损益按账户平均/摊薄成本估算，期权单位未核对时留缺口；不冒称完整券商原生浮盈。日常只读长桥数据，无下单或申购。
+账户金额、持仓、盈亏与精确成交只写用户私有目录，默认 `~/.longbridge-assistant/`；输出 `current/index.html` 和 IPO 子页。目录 0700、文件 0600，Git 和通知不包含账户明细。持仓损益按账户平均/摊薄成本估算，期权单位未核对时留缺口；不冒称完整券商原生浮盈。日常只读长桥数据，无下单或申购。
 
 ```bash
 npx skills update longbridge-assistant --global
