@@ -1,119 +1,67 @@
 # 长桥助手 · Longbridge Assistant
 
-每天看清相关事件、上一交易日的成交，以及港股新股提醒。一个标准 Agent Skill，输出可离线阅读的本地 HTML。
+每天看清上一交易日做了什么买卖，以及有哪些港股新股可关注。一个标准 Agent Skill，输出私有、可离线阅读的 HTML。
 
 ## 当前状态
 
-首版 Skill 源码已交付开发分支 `codex/longbridge-assistant`，代码提交为 `efd9adcbf205ec7e6635a3966a447ca782b67cb3`。已在 Python 3.12.14 / Longbridge CLI 0.28.0 下实际生成私有 HTML：账户采集完整，IPO 名单与发行日程完整，事件新闻窗口覆盖不足；当前 IPO 的核心估值与财务分析仍为资料不足。全部人类验收仍为 PENDING。
+最新需求 v1.5：**仓位操作简报与成交明细 → 打新提示**，取消相关事件和当前持仓读取。打新只做轻量公开搜索，详细财务缺失直接说明。
 
-默认分支 `main` 当前只有基础文档，尚未合并 Skill。现在安装请使用下方「固定版本」的已核验提交入口；main 合并后才使用下面的简短仓库入口。安装器发现已通过，实际安装与当前 Agent 同时发现两个 Skill 尚未核验。
+公开仓库已创建，开发分支 `codex/longbridge-assistant` 的旧版代码提交为 `efd9adcbf205ec7e6635a3966a447ca782b67cb3`。该版已实际生成私有报告，仍有事件功能及旧初始化限制；v1.5 Skill 精确修改待批准，尚未应用。人类验收 PENDING。main 当前只有基础文档，未合并 Skill、未发版。
 
-## 安装
+## 安装与连接（v1.5 目标流程）
 
-完整初始化包括两个 Skill 的安装与长桥连接验证。使用现成的 [skills CLI](https://github.com/vercel-labs/skills)，两次选择**同一个 Agent、同一种安装范围**：
+安装本助手，使用现成 [skills CLI](https://github.com/vercel-labs/skills) 选择所用 Agent：
 
 ```bash
-npx skills add longbridge/skills --skill longbridge --global
 npx skills add archerthegoat/longbridge-assistant --skill longbridge-assistant --global
 ```
 
-第一条安装[长桥官方基础 Skill `longbridge`](https://open.longbridge.com/skill)，第二条安装长桥助手。两个命令都需要执行；安装器不会自动递归安装 Skill 依赖，也不会完成长桥登录。已有官方 Skill 时先核对来源和当前 Agent 是否可发现，避免重复安装。
-
-`--global` 表示个人全局安装；省略时安装到当前项目。安装器支持 Codex、Claude Code、Cursor、Gemini CLI、GitHub Copilot、OpenCode 等。安装器支持范围与本项目实际运行核验分开记录。
-
-安装器当前版本 `skills 1.7.0` 要求 Node.js ≥22.20.0；Node/npm/npx 仅用于安装。本项目无需单独发布或安装自己的 npm 包。[安装器版本要求](https://registry.npmjs.org/skills/latest)
-
-无需 Node 时，也可分别下载两个仓库 ZIP，把官方 `skills/longbridge` 和本仓库 `skills/longbridge-assistant` 的完整文件夹放进同一个 Agent 支持的 Skill 目录；保留脚本、引用和模板的相对目录结构。之后仍需完成下方连接验证。
-
-### 运行依赖
-
-- 支持 Agent Skills、能执行本地命令的 Agent。
-- 当前 Agent 可发现官方基础 Skill `longbridge` 与 `longbridge-assistant`。
-- 首版脚本运行环境为 macOS / Linux，使用 POSIX 文件权限保护私有报告；其他系统尚未核验。
-- Python 3.10+，使用标准库；系统提供 IANA 时区数据。缺少时区库的环境按 Python 官方说明安装 `tzdata`。
-- Longbridge CLI 0.28.0 与用户已有有效登录；脚本按该版本接口核对，网络和数据权限由长桥提供。
-
-macOS / Linux 的长桥官方安装与登录入口：
+上面的简短命令在 main 交付 Skill 后使用。当前旧版可发现的固定入口：
 
 ```bash
-brew install --cask longbridge/tap/longbridge-terminal
-longbridge auth login
-```
-
-其他系统参见[长桥 CLI 官方安装文档](https://open.longbridge.com/docs/cli/install)。已有有效登录时直接复用。凭据由官方登录流程管理，不复制到助手、HTML 或提示词。
-
-### 验证连接，完成初始化
-
-安装后确认当前 Agent 的 Skill 列表可发现两个名称；必要时按该 Agent 的方式重新加载会话。文件存在不等于已被发现。
-
-再执行助手的安全连接检查，用实际安装位置替换 `SKILL_DIR`：
-
-```bash
-python3 SKILL_DIR/scripts/collect.py --check-connection
-```
-
-该入口核对 CLI 0.28.0，仅查询公开美股交易日历，返回连接状态；不读取持仓、成交或结单。成功表示 CLI 路径可连接，账户、事件和 IPO 权限仍由正式采集分模块确认。已有 MCP 连接不能替代 CLI 连接验证。
-
-**初始化完成条件：** 同一 Agent 可发现两个 Skill，CLI 版本符合要求，安全公开查询成功。任一步缺失都报告“初始化未完成”。可以对 Agent 说：“初始化长桥助手，同时安装官方 longbridge Skill，并验证连接。”
-
-首次使用也会检查这些前提；定时运行缺依赖时报告未就绪，不自行安装、重新登录或清理旧配置。采用这一通用流程：Agent Skills 标准未定义安装后 hook，核查的 skills 1.7.0 也没有可依赖的 postinstall hook。
-
-官方 Skill 提供设置与基础能力参考；助手日报仍按自己的只读采集范围、单一来源与隐私约定执行，不扩展读取余额、资产或盈亏，不静默使用网页搜索补源。
-
-### 固定版本与更新
-
-安装前列出可发现的 Skill：
-
-```bash
-npx skills add longbridge/skills --skill longbridge --list
-npx skills add archerthegoat/longbridge-assistant --list
-```
-
-当前已通过安装器只列出发现的固定版本：
-
-```bash
-npx skills@1.7.0 add "https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge" --skill longbridge --global
 npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/efd9adcbf205ec7e6635a3966a447ca782b67cb3/skills/longbridge-assistant" --skill longbridge-assistant --global
 ```
 
-更新时只选择这两个 Skill；需固定版本时使用上述具体提交入口。常规更新：
+`--global` 为个人安装，省略为项目安装。Node/npm/npx 仅用于安装，无需发布自己的 npm 包。已核查安装器 1.7.0 要求 Node ≥22.20.0。无 Node 时下载仓库，把完整 `skills/longbridge-assistant` 放入 Agent 的 Skill 目录，保留相对结构。安装器支持范围与实际运行证据分开记录。
+
+**已有授权 Longbridge 插件直接复用，无需另装官方基础 Skill，也无需重复授权。** 插件的公开新闻搜索已在本次实际调用成功。其他 Agent 可选参考 [官方基础 Skill](https://open.longbridge.com/skill) 设置长桥能力。
+
+本版精确成交由 CLI 本地采集后直接渲染，避免经过模型；因此账户日报还需要 macOS/Linux、Python 3.10+、IANA 时区数据、Longbridge CLI 0.28.0 与有效 CLI 登录。插件与 CLI 的授权分别核实，已有连接直接复用。
 
 ```bash
-npx skills update longbridge longbridge-assistant --global
+# 仅未安装/未登录时按官方流程设置
+brew install --cask longbridge/tap/longbridge-terminal
+longbridge auth login
+
+# 用实际安装目录替换 SKILL_DIR
+python3 SKILL_DIR/scripts/collect.py --check-connection
 ```
 
-更新前阅读 [CHANGELOG](CHANGELOG.md)，保存私有输出；需要回退时重新安装先前已验证的固定提交。不要运行清除所有 `longbridge-*` 的批量重装步骤，这会包含 `longbridge-assistant`。
+公开日历检查不证明成交权限，正式采集分别确认。CLI 不可用时仍可做插件公开新股初筛，账户模块标未就绪；定时运行不自动安装、登录或修改 hook。凭据由长桥管理。
 
-运行前用 `python3 --version` 确认满足 Python 3.10+。本次真实接入使用 3.12.14；macOS 自带的 Python 可能低于要求，不应直接假定满足依赖。其他 Python/Agent 组合仍需各自核验。
+## 每日输出
 
-## 使用
+1. **仓位操作简报与成交明细**：最近完成美股交易日，按标的分开显示买入、卖出、笔数和成交额，展开实际工具和逐笔数据；支持正股与期权。不读取当前持仓、盈亏或资产。
+2. **港股打新提示**：多只新股按阶段和关键日期排列，点击阅读简短子页。一句结论、两三条理由、估值粗判断/业务支撑/明显风险、热度参考，来源折叠。
 
-安装后对你的 Agent 说：
+结论为可以关注 / 偏谨慎 / 暂时跳过 / 资料不足。详细财务缺项不自动阻断初筛；不编上涨百分比，不承诺获利。这里只考虑短线参与。
 
-> 用长桥助手更新今天的简报。
+工作日建议周一至周五 09:00（上海）；周一通常汇报上周五，休市回退最近完成交易日。生成本地 HTML，网页不触发模型、联网采集或交易。
 
-> 用长桥助手看一下这只港股新股，按估值、竞争力和明显风险做短线初筛。
+> 用长桥助手更新今天的仓位操作简报和打新提示。
 
-首页的顺序是：
+## 隐私与更新
 
-1. **相关事件**：当前持仓与上一完成交易日成交标的的相关公司事件。
-2. **账户简报与成交明细**：按标的显示买入、卖出和成交额，展开查看实际工具及逐笔量价。
-3. **港股 IPO 提醒**：多只新股按最近可操作截止时间排列，点进一屏左右的简短快评。
+精确成交只写用户私有目录，默认 `~/.longbridge-assistant/`；输出 `current/index.html` 和 IPO 子页。目录 0700、文件 0600，Git 和通知不包含账户明细。日常只读长桥数据，无下单或申购。
 
-IPO 快评使用“可以关注 / 偏谨慎 / 暂时跳过 / 资料不足”四种定性结论。主要检查估值、竞争力及有来源的风险红旗，热度作为参考。
+```bash
+npx skills update longbridge-assistant --global
+```
 
-成交范围首版为美股正股与期权，IPO 为港股；各模块标明时间、覆盖与缺口。未查询成功的内容不能显示为零或没有事件。输出读取长桥数据，不进行下单或申购。
+更新前保存私有输出，回退用旧固定提交。不要批量清理 `longbridge-*`。每日调度使用 Agent 自身能力；Skill 安装不自动建立任务。
 
-## 本地报告
+## 文档
 
-账户量价和完整合约只保存在用户的私有本地目录，默认 `~/.longbridge-assistant/`，输出 `current/index.html` 和相应 IPO 子页。网页离线可读；打开页面不会访问券商凭据或触发模型调用。
-
-仓库、样例和发布附件只保留合成数据。每日定时调用由所用 Agent 的调度能力配置；建议工作日早上运行，按交易日历读取最近完成的交易日。
-
-## 文档与发布
-
-- [产品需求与验收标准](docs/PRD.md)
+- [PRD 与验收标准](docs/PRD.md)
 - [变更记录](CHANGELOG.md)
 - [首版发布说明草稿](docs/release-notes/v0.1.0-rc.1.md)
-
-发布说明会列明已验证的代码提交、CLI 版本、安装器、Agent 环境及限制。演示运行、真实接入和人类验收分别记录。
