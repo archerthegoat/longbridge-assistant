@@ -1,0 +1,25 @@
+:root{color-scheme:light;--ink:#172923;--muted:#708078;--line:#e1e9e4;--paper:#f5f7f4;--surface:#fff;--green:#177a55;--green-soft:#e9f5ee;--amber:#ac6b1a;--amber-soft:#fff3df;--red:#b74d49;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);line-height:1.6}
+.shell{width:min(1080px,calc(100% - 40px));margin:0 auto;padding:28px 0 72px}
+header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:26px}
+.brand{font-size:15px;font-weight:700}.muted,.meta{color:var(--muted);font-size:12px}h1{font-size:32px;letter-spacing:-.04em;margin:4px 0 8px}h2{font-size:17px;margin:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-top:18px;overflow:hidden}
+.panel-head{display:flex;justify-content:space-between;gap:16px;align-items:start;padding:20px 22px 14px}.content{padding:0 22px 20px}
+.pill{display:inline-flex;border-radius:99px;padding:4px 9px;font-size:11px;background:#f0f3f1;color:#63716a;white-space:nowrap}
+.pill.good{background:var(--green-soft);color:var(--green)}.pill.warn{background:var(--amber-soft);color:var(--amber)}
+.event{display:grid;grid-template-columns:95px 1fr;gap:20px;padding:15px 0;border-top:1px solid var(--line)}
+.event h3{font-size:14px;margin:0 0 5px}.event p{font-size:13px;margin:0;color:#52635b}.source{font-size:11px;margin-top:7px;color:var(--muted)}
+a{color:var(--green);text-underline-offset:3px}a:focus-visible,summary:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 16px}.stat{padding:14px;background:#f8faf8;border:1px solid var(--line);border-radius:8px}.stat strong{display:block;font-size:20px;margin-top:5px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}.tags span{background:#f2f5f3;color:#55675e;padding:4px 8px;border-radius:6px;font-size:11px}
+.trade{border-top:1px solid var(--line)}summary{cursor:pointer;padding:16px 0;list-style:none}summary::-webkit-details-marker{display:none}
+.trade summary{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}.symbol{font-size:14px;font-weight:700}.buy{color:var(--green)}.sell{color:var(--red)}.small{font-size:12px}
+.table-wrap{overflow-x:auto;padding-bottom:16px}table{width:100%;min-width:730px;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:10px 8px;border-top:1px solid var(--line);white-space:nowrap}th{font-weight:500;color:var(--muted)}
+.ipo-row{display:grid;grid-template-columns:1.2fr 1fr auto;gap:18px;align-items:center;padding:16px 0;border-top:1px solid var(--line)}
+.button{padding:8px 12px;border:1px solid #b9d8c5;border-radius:8px;background:#f5fbf7;text-decoration:none;font-size:12px}
+.note{background:#faf8f0;color:#796449;border-radius:8px;padding:10px 12px;font-size:12px;margin:0 0 14px}
+.verdict{padding:24px;background:#eef5ef;border-radius:12px;margin:24px 0}.verdict p{font-size:17px;margin:12px 0 0}
+.check{padding:18px 0;border-top:1px solid var(--line)}.check h2{font-size:14px}.check p{font-size:14px;color:#52635b;margin:8px 0 0}
+.empty{color:var(--muted);font-size:13px;padding:12px 0}footer{font-size:11px;color:var(--muted);margin-top:24px}
+details.sources>summary{font-size:12px;color:var(--green)}ul{padding-left:20px}.demo{padding:10px 14px;background:var(--amber-soft);color:#785219;border-radius:8px;margin-bottom:20px;font-size:12px}
+@media(max-width:680px){.shell{width:calc(100% - 24px);padding-top:18px}header{align-items:start}h1{font-size:26px}.panel-head{padding:16px}.content{padding:0 16px 16px}.stats{grid-template-columns:1fr}.event{grid-template-columns:1fr;gap:4px}.ipo-row{grid-template-columns:1fr;gap:8px}.trade summary{align-items:start}.verdict{padding:18px}}
