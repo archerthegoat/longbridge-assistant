@@ -1,0 +1,21 @@
+# Local reports, broker data and credentials never belong in source control.
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*token*
+*credential*
+.longbridge/
+.private/
+runtime/
+reports/
+state.json
+account.json
+analysis-input.json
+__pycache__/
+*.py[cod]
+.DS_Store
+node_modules/
+.npm/
