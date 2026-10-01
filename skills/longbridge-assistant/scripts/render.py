@@ -71,11 +71,16 @@ def totals(rows, side):
 
 
 def snapshot_html(data):
-    balances=data['balances'];holdings=data['holdings']
-    stats=''.join('<div class="stat"><span class="meta">账户净资产 · '+e(r['currency'])+'</span><strong>'+money(r['net_assets'],r['currency'] or '')+'</strong></div><div class="stat"><span class="meta">总现金 · '+e(r['currency'])+'</span><strong>'+money(r['total_cash'],r['currency'] or '')+'</strong></div>' for r in balances['rows'])
-    rows=''.join('<tr><td>'+e(r['name'])+'<br>'+e(r['symbol'])+'</td><td>'+e(r['quantity'])+('<br><span class="muted">实际合约乘数 '+e(r['multiplier'])+'</span>' if r.get('multiplier') else '')+'</td><td>'+e(r['currency'])+' '+e(r['cost_price'])+'</td><td>'+e(r['currency'])+' '+e(r['price'])+'<br><span class="muted">'+e(r['quote_time'])+'</span></td><td>'+money(r['pnl'],r['currency'] or '')+'<br><span class="muted">'+e(r['gap'] or '按账户成本价计算')+'</span></td></tr>' for r in holdings['rows'])
-    if not rows:rows='<tr><td colspan="5">'+('当前无证券持仓' if holdings['status']=='完整但为空' else '持仓查询未完整取得')+'</td></tr>'
-    return '<h3>账户金额与当前持仓</h3><p class="meta">快照 '+e(data['as_of'])+' · 金额 '+e(balances['status'])+' · 持仓 '+e(holdings['status'])+'</p><div class="stats">'+(stats or '<p>账户金额未取得</p>')+'</div><div class="table-wrap"><table><thead><tr><th>当前持仓</th><th>数量</th><th>账户成本价</th><th>参考价 / 报价时间</th><th>持仓盈亏（按券商成本估算）</th></tr></thead><tbody>'+rows+'</tbody></table></div><p class="meta">账户金额为长桥原字段，各币种分别显示，不相加。持仓成本遵循账户平均买入/摊薄成本设置；持仓盈亏（按券商成本估算）为参考价与成本价差额乘数量，成本模式未提供，摊薄成本可能包含历史盈亏；不能等同纯未实现收益。报价按所示时间；缺项或期权单位未核对则不计算。本表是证券持仓，未纳入独立基金持仓接口。</p><hr>'
+    balances, holdings = data['balances'], data['holdings']
+    stats = ''.join('<div class="stat"><span class="meta">账户净资产 · USD</span><strong>' + money(row['net_assets'], 'USD') + '</strong></div><div class="stat"><span class="meta">总现金 · USD</span><strong>' + money(row['total_cash'], 'USD') + '</strong></div>' for row in balances['rows'] if row.get('currency') == 'USD')
+    pnl = data.get('daily_pnl', {})
+    amount = pnl.get('amount')
+    color = 'pnl-positive' if amount is not None and Decimal(amount) > 0 else 'pnl-negative' if amount is not None and Decimal(amount) < 0 else ''
+    stats += '<div class="stat"><span class="meta">当日账户盈亏 · USD</span><strong class="' + color + '">' + money(amount, 'USD') + '</strong></div>'
+    rows = ''.join('<tr><td>' + e(row['name'] or row['symbol']) + '<br><span class="muted">' + e(row['symbol']) + '</span></td><td>' + e(row['quantity']) + '</td><td>' + e(row['currency']) + ' ' + e(row['close_price']) + '</td></tr>' for row in holdings['rows'])
+    if not rows:
+        rows = '<tr><td colspan="3">' + ('暂无持仓' if holdings['status'] == '完整但为空' else '持仓未取得') + '</td></tr>'
+    return '<h3>账户与持仓</h3><div class="stats account-stats">' + (stats or '<p>USD账户金额未取得</p>') + '</div><div class="table-wrap"><table class="holdings-table"><thead><tr><th>持仓</th><th>数量</th><th>最新收盘价</th></tr></thead><tbody>' + rows + '</tbody></table></div><hr>'
 
 
 def account_html(data, previous_date, snapshot=None):
@@ -98,7 +103,7 @@ def account_html(data, previous_date, snapshot=None):
             side = {"Buy": "买入", "Sell": "卖出"}.get(row["side"], "方向未提供")
             qty = e(row.get("quantity")) + (" 张" if row["instrument"] == "期权" else " 股")
             fills += (
-                f'<tr><td>{e(row["time"])}<br><span class="muted">America/New_York</span></td>'
+                '<tr>'
                 f'<td>{e(side)}<br><span class="muted">实际成交回报</span></td><td>{e(tool)}</td><td>{qty}</td>'
                 f'<td>{e(row.get("currency") or "币种未提供")} {e(row.get("price"))}</td>'
                 f'<td>{money(row.get("amount"), row.get("currency") or "")}</td></tr>'
@@ -107,7 +112,7 @@ def account_html(data, previous_date, snapshot=None):
             f'<details class="trade"><summary><div><span class="symbol">{e(ticker)} {e(name)}</span> <span class="meta">{len(items)} 笔成交{e(unknown_copy)}</span></div>'
             f'<div class="small"><span class="buy">买入 {buys} 笔 · {totals(items, "Buy")}</span>　'
             f'<span class="sell">卖出 {sells} 笔 · {totals(items, "Sell")}</span></div><span class="small">展开明细 ↓</span></summary>'
-            '<div class="table-wrap"><table><thead><tr><th>成交时间</th><th>方向</th><th>实际工具</th><th>数量</th><th>成交价</th><th>成交额</th></tr></thead>'
+            '<div class="table-wrap"><table><thead><tr><th>方向</th><th>实际工具</th><th>数量</th><th>成交价</th><th>成交额</th></tr></thead>'
             f'<tbody>{fills}</tbody></table></div></details>'
         )
     if not rows:
@@ -121,8 +126,8 @@ def account_html(data, previous_date, snapshot=None):
     reason = f'<p class="note">{e(data["reason"])}</p>' if data.get("reason") else ""
     return (
         '<section class="panel" id="account"><div class="panel-head"><div><h2>账户简报、持仓与操作明细</h2>'
-        f'<div class="meta">US · {e(data.get("date") or "交易日未确定")}{e(repeated)}<br>{e(data.get("coverage"))}</div></div>{pill(data["status"])}</div>'
-        f'<div class="content">{snapshot_html(snapshot) if snapshot else ""}{reason}<h3>上日操作与成交明细</h3><div class="stats"><div class="stat"><span class="meta">成交 / 标的{e(subtotal)}</span><strong>{e(count)}</strong></div>'
+        f'<div class="meta">US · {e(data.get("date") or "交易日未确定")}</div></div></div>'
+        f'<div class="content">{snapshot_html(snapshot) if snapshot else ""}<h3>上日操作与成交明细</h3><div class="stats"><div class="stat"><span class="meta">成交 / 标的{e(subtotal)}</span><strong>{e(count)}</strong></div>'
         f'<div class="stat"><span class="meta">买入成交额{e(subtotal)}</span><strong>{buy_total}</strong></div>'
         f'<div class="stat"><span class="meta">卖出成交额{e(subtotal)}</span><strong>{sell_total}</strong></div></div>'
         f'{details}</div></section>'
@@ -225,7 +230,7 @@ def ipo_page(item, judgment, generated_at, back="../index.html#ipo"):
     keys = [("valuation", "估值"), ("competitiveness", "竞争力"), ("red_flags", "风险红旗")]
     checks = "".join(f'<section class="check"><h2>{title}</h2><p>{e(judgment.get(key) or "核心资料尚未取得或核对")}</p></section>' for key, title in keys)
     allowed = ipo_source_urls(item, judgment)
-    sources = "".join("<li>" + link(source.get("title") or "资料来源", source["url"]) + " · " + e(source.get("time") or "时间见原文") + "</li>"
+    sources = "".join("<li>" + link(source.get("title") or "资料来源", source["url"]) + "</li>"
                       for source in judgment.get("sources", []) if isinstance(source, dict) and source.get("url") in allowed)
     if not sources:
         sources = "".join("<li>" + link("长桥提供的发行资料", url) + "</li>" for url in sorted(allowed))
@@ -234,11 +239,11 @@ def ipo_page(item, judgment, generated_at, back="../index.html#ipo"):
     heat = judgment.get("heat") or ("长桥预计认购参考：" + item["heat"] + "（非全市场最终倍数）" if item.get("heat") else "热度资料未取得")
     return (
         (f'<a href="{e(back)}">← 返回打新提醒</a>' if back else "") +
-        f'<h1>{e(item["name"])}</h1><div class="meta">{e(item["symbol"])} · 资料采集时间 {e(item.get("profile_time") or generated_at)} · 分析时间 {e(judgment.get("analysed_at"))}</div>'
+        f'<h1>{e(item["name"])}</h1><div class="meta">{e(item["symbol"])}</div>'
         f'<div class="verdict">{pill(judgment["conclusion"])}<p>{e(judgment.get("summary") or "暂无足够依据")}</p></div>'
         f'{checks}<p class="meta">{e(heat)}</p><details class="sources"><summary>来源与资料缺口</summary>'
-        f'<ul>{sources or "<li>长桥尚未提供可用原文链接</li>"}</ul><p class="meta">{e("；".join(value for value in [item.get("gap"), gaps_text] if value) or "仅依据已取得公开资料初筛，未做完整财务尽调")}</p>'
-        '<p class="meta">资料中的日期与范围请一并核对；申购费、融资利息与交易费用会影响净收益。</p></details>'
+        f'<ul>{sources or "<li>长桥尚未提供可用原文链接</li>"}</ul><p class="meta">{e("；".join(value for value in [item.get("gap"), gaps_text] if value) or "")}</p>'
+        '</details>'
     )
 
 
@@ -288,13 +293,13 @@ def render(root, account, public, analysis):
             ipo_rows += (
                 f'<div class="ipo-row"><div><strong>{e(item["name"])}</strong><div class="meta">{e(ticker)} · {e(stage)}</div>'
                 f'<div class="meta">发行价 {e(item.get("currency") or item.get("profile", {}).get("issue_currency") or "币种未提供")} {e(item.get("issue_price") or item.get("profile", {}).get("issue_price") or "未提供")} · 每手入场费 {money(item.get("entrance_fee") or None, item.get("currency") or "")}</div></div>'
-                f'<div class="small">{e(date_label)} · {e(deadline or "未提供")}<div class="meta">{e(item.get("deadline_source") or "长桥日程")}</div></div>'
+                f'<div class="small">{e(date_label)} · {e(deadline or "未提供")}</div>'
                 f'<a class="button" href="ipo/{e(filename)}">{e(judgment["conclusion"])} · 短线评估 →</a></div>'
             )
         ipo = public["ipo"]
         ipo_section = (
             '<section class="panel" id="ipo"><div class="panel-head"><div><h2>港股打新提醒</h2><div class="meta">按阶段与关键日期排列</div></div>'
-            f'{pill(ipo["status"])}</div><div class="content">'
+            '</div><div class="content">'
             + (f'<p class="note">{e(ipo["reason"])}</p>' if ipo.get("reason") else "")
             + (ipo_rows or '<p class="empty">' + ("暂无可提示新股" if ipo["status"] == "完整但为空" else "新股查询未完成") + "</p>")
             + "</div></section>"

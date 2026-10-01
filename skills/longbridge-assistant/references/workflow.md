@@ -6,7 +6,7 @@
 
 collect.py 的默认输出根目录是 ~/.longbridge-assistant/，必须在 Git 仓库之外。可用 --output-root 改到明确的用户私有目录。采集器只输出状态与文件入口，原始 API 响应只在内存处理。
 
-- account.json：只供渲染器读取的账户金额、证券持仓与成交投影；没有账户标识、订单 ID 或成交 ID。
+- account.json：只供渲染器读取的USD账户金额、单日账户盈亏、证券持仓数量及收盘价与成交投影；没有账户标识、订单 ID 或成交 ID。
 - analysis-input.json：公开 IPO 资料；没有持仓数量、成交量价、成本或资金。
 - analysis.json：Agent 写入的简短公开内容分析，绑定本次采集版本。
 - ipo-input.json、ipo-review/*.html：单只新股模式的公开资料与独立子页，不读取账户或改写每日简报。
@@ -72,10 +72,22 @@ collect.py 的默认输出根目录是 ~/.longbridge-assistant/，必须在 Git 
 
 ## 账户金额与持仓口径
 
-净资产与总现金直接使用 /v1/asset/account 原字段及币种，不转换后相加，不将总现金称为购买力或可提现现金。/v1/asset/stock 原始响应保留成本与数量的缺项区别；空值不默认为零。账户当前快照与上日成交日期分别标注。
+请求 /v1/asset/account?currency=USD，仅接受返回 currency=USD 的 net_assets / total_cash。使用券商原始USD视图，不在本地换汇、不累加不同币种，不把现金称为购买力。空值保持缺失，有符号数保留。
 
-股票/ETF 只在静态证券板块、持仓与报价币种、有限数量/成本/最近成交价及带时区报价时间均已核对时，按 (参考价−账户成本价)×有符号数量计算浮动盈亏。成本遵循长桥账户平均买入/摊薄成本设置，不声称为已实现收益或完整费后收益。没有历史收益、汇率归因或跨币种总盈亏。
+/v1/asset/stock 仅投影标的、名称、数量和报价币种；不保留成本价，不计算或展示持仓盈亏。持仓列表不扩展独立基金持仓接口。
 
-期权需另核实成本价单位、数量单位与实际乘数；本次尚未完成该单位核验，显示真实持仓与已取得报价，盈亏写未提供/待核对，不能默认乘数100。其他不支持工具同样保留真实字段及缺口。证券持仓列表不宣称涵盖独立基金持仓；账户净资产仍使用提供方整体字段。金额/持仓模块独立失败时保留其他结果，精确值仅写本机私有文件。
+收盘价调用 quote.candlesticks，period=day、adjust=none；CLI 0.28.0 固定常规盘Intraday，返回 SDK Candlestick 数组。只接受 trade_session=Intraday、带时区时间戳、符合最新已核实完成交易日的当地日期，以及有限正 close。日线时间是开始时间，不能据此证明已收盘。用市场交易日历及常规时段结束后30分钟确定完成日期；US/HK/SG分别采用正确时区。当天半日市进入交易时段但特殊收市未核实，或其他市场/目标日期日线缺失时，不替代为实时价/前收盘价。
 
-[账户金额合同](https://open.longbridge.com/docs/trade/asset/account) · [证券持仓与成本定义](https://open.longbridge.com/docs/trade/asset/stock)
+前端持仓表只有持仓、数量、最新收盘价三列；价格保留原币种与精度。快照时间、报价时间、数据状态和合规/技术说明不显示，内部仍保留 close_date、close_bar_time、as_of、模块状态与缺项原因。失败时仅显示相应金额/价格未提供，不伪造零或空仓。报告交易日、IPO申购截止/上市等业务日期照常展示；逐笔成交时间仅保留内部，不进入HTML。
+
+[USD账户接口](https://open.longbridge.com/docs/trade/asset/account) · [常规盘日线](https://open.longbridge.com/docs/quote/pull/candlestick)
+
+## 单日账户盈亏与金额排序
+
+GET /v1/portfolio/profit-analysis-summary，仅请求简报交易日：start为该YYYY-MM-DD的UTC零点Unix秒，end=start+86399（官方日期参数转换合同）。只投影currency、sum_profit和返回期间；仅接受原始USD、有限有符号金额、返回start_date/end_date均等于简报日。空值/期间错配不显示零，不读取盈亏sublist/明细/流水。该字段是券商指定单日汇总，不称为实时今日收益、持仓浮盈或完整费后收益。
+
+内部排序金额按abs(数量×已核实收盘价×乘数)估算；股票/ETF只接受已验证板块与币种，乘数1；USOption只用实际contract_multiplier，数量采用标准美股期权合约惯例，接口单位未明确声明的推断写sort_quantity_basis，sort_status为部分完成。USOptionS或其他未知工具估算缺失置后。非USD仅按 /v1/asset/exchange_rates 的实际average_rate转换排序：1 base=value other，other→base除、base→other乘；不展示或用于修改账户原生USD金额。缺价格/乘数/汇率置后，不充零。
+
+视觉参考[长桥官网](https://longbridge.com/sg)：白色表面、浅灰底色、黑色正文与青绿色点缀。前端只显示金额、当日盈亏、持仓三列、无成交时间的成交明细和IPO；不出现数据合规、时间戳或技术状态。
+
+[单日汇总合同](https://open.longbridge.com/docs/account/portfolio/profit-analysis-summary) · [汇率方向合同](https://open.longbridge.com/docs/account/portfolio/exchange-rates)

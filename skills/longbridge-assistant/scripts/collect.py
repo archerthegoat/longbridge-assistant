@@ -23,11 +23,12 @@ SYMBOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.(US|HK|CN|SG)$")
 OPTION = re.compile(r"^[A-Za-z0-9_.-]+[0-9]{6}[CP][0-9]+\.US$")
 READ_METHODS = {
     "quote.trading_days", "quote.trading_session", "quote.static_info",
-    "quote.option_quote", "quote.quote", "trade.order_detail",
+    "quote.option_quote", "quote.candlesticks", "trade.order_detail",
 }
 READ_PATHS = {
     "/v3/trade/execution/all", "/v1/ipo/profile", "/v1/ipo/timeline",
     "/v1/asset/account", "/v1/asset/stock",
+    "/v1/portfolio/profit-analysis-summary", "/v1/asset/exchange_rates",
 }
 ENV_KEYS = {
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "LANG",
@@ -196,65 +197,199 @@ def numeric(value):
         if value is None or str(value).strip()=='':return None
         n=Decimal(str(value));return n if n.is_finite() else None
     except (ValueError,InvalidOperation):return None
-def collect_snapshot(provider,now):
-    balances={'status':'失败','reason':'账户金额未取得','rows':[]}
-    holdings={'status':'失败','reason':'持仓未取得','rows':[]}
+def completed_close(provider, ticker, now, calendars, sessions):
+    market = ticker.rsplit('.', 1)[-1]
+    zones = {'US': 'America/New_York', 'HK': 'Asia/Hong_Kong', 'SG': 'Asia/Singapore'}
+    if market not in zones:
+        raise SafeError('close_market_unverified')
+    zone = ZoneInfo(zones[market])
+    today = now.astimezone(zone).date()
+    if market not in calendars:
+        calendar = provider.call('quote.trading_days', {
+            'market': market, 'start': (today - timedelta(days=28)).isoformat(), 'end': today.isoformat(),
+        })
+        if not isinstance(calendar, dict) or not isinstance(calendar.get('trading_days'), list) or not isinstance(calendar.get('half_trading_days', []), list):
+            raise SafeError('close_calendar_schema')
+        session = next((item for item in sessions if isinstance(item, dict) and item.get('market') == market), {})
+        intraday = [item for item in session.get('trade_sessions', []) if isinstance(item, dict) and item.get('trade_session') == 'Intraday']
+        if not intraday:
+            raise SafeError('close_session_missing')
+        begin = min(time.fromisoformat(item['begin_time']) for item in intraday)
+        end = max(time.fromisoformat(item['end_time']) for item in intraday)
+        if begin >= end:
+            raise SafeError('close_session_invalid')
+        half = set(calendar.get('half_trading_days', []))
+        # Do not infer today's special half-day closing time from a normal-day schedule.
+        if today.isoformat() in half and datetime.combine(today, begin, zone) <= now.astimezone(zone) < datetime.combine(today, end, zone) + timedelta(minutes=30):
+            raise SafeError('half_day_close_unverified')
+        days = [datetime.fromisoformat(day).date() for day in set(calendar['trading_days']) | half]
+        completed = [day for day in days if datetime.combine(day, end, zone).astimezone(UTC) + timedelta(minutes=30) <= now]
+        if not completed:
+            raise SafeError('completed_close_date_missing')
+        calendars[market] = (max(completed), zone)
+    day, zone = calendars[market]
+    bars = provider.call('quote.candlesticks', {'symbol': ticker, 'period': 'day', 'count': 10, 'adjust': 'none'})
+    if not isinstance(bars, list):
+        raise SafeError('close_schema')
+    matching = []
+    for bar in bars:
+        if not isinstance(bar, dict) or bar.get('trade_session') != 'Intraday':
+            continue
+        stamp = moment(bar.get('timestamp'))
+        price = numeric(bar.get('close'))
+        if stamp.astimezone(zone).date() == day and stamp <= now and price is not None and price > 0:
+            matching.append((stamp, price))
+    if len(matching) != 1:
+        raise SafeError('latest_close_not_verified')
+    stamp, price = matching[0]
+    return str(price), day.isoformat(), stamp.isoformat()
+
+
+def collect_daily_pnl(provider, report_day):
+    result = {'status': '失败', 'currency': 'USD', 'amount': None, 'report_date': report_day, 'reason': '单日账户盈亏未取得'}
+    if not report_day:
+        return result
     try:
-        data=provider.get('/v1/asset/account')
-        if not isinstance(data,dict) or not isinstance(data.get('list'),list):raise SafeError('balance_schema')
-        rows=[];partial=False
+        day = datetime.fromisoformat(report_day).date()
+        start = int(datetime.combine(day, time.min, UTC).timestamp())
+        data = provider.get('/v1/portfolio/profit-analysis-summary', {'start': str(start), 'end': str(start + 86399)})
+        if not isinstance(data, dict):
+            raise SafeError('daily_pnl_schema')
+        summary = data.get('summary', data)
+        if not isinstance(summary, dict):
+            raise SafeError('daily_pnl_schema')
+        amount = numeric(summary.get('sum_profit'))
+        period = {key: summary.get(key) for key in ['start_date', 'end_date', 'start_time', 'end_time']}
+        result['period'] = period
+        if summary.get('currency') == 'USD' and period['start_date'] == report_day and period['end_date'] == report_day and amount is not None:
+            result.update(status='完整', amount=str(amount), reason='')
+        else:
+            result['reason'] = '单日日期、USD币种或原始金额未核对'
+    except (SafeError, ValueError, TypeError, KeyError, OverflowError, OSError):
+        pass
+    return result
+
+
+def sort_holdings(provider, holdings):
+    rows = holdings['rows']
+    symbols = sorted({row['symbol'] for row in rows if SYMBOL.fullmatch(row['symbol'])})
+    infos, options, rates = {}, {}, []
+    try:
+        if symbols:
+            infos = mapping(provider.call('quote.static_info', {'symbols': symbols}))
+    except (SafeError, ValueError, TypeError, KeyError):
+        pass
+    option_symbols = [ticker for ticker in symbols if OPTION.fullmatch(ticker) or infos.get(ticker, {}).get('board') in {'USOption', 'USOptionS'}]
+    try:
+        if option_symbols:
+            options = mapping(provider.call('quote.option_quote', {'symbols': option_symbols}))
+    except (SafeError, ValueError, TypeError, KeyError):
+        pass
+    if any(row.get('currency') not in {None, 'USD'} for row in rows):
+        try:
+            response = provider.get('/v1/asset/exchange_rates')
+            if isinstance(response, dict) and isinstance(response.get('exchanges'), list):
+                rates = response['exchanges']
+        except (SafeError, ValueError, TypeError, KeyError):
+            pass
+    spot_boards = {'USMain', 'USPink', 'HKEquity', 'SGMain', 'SHMainConnect', 'SHMainNonConnect', 'SHSTAR', 'SZMainConnect', 'SZMainNonConnect', 'SZGEMConnect', 'SZGEMNonConnect'}
+    partial = False
+    for row in rows:
+        row['sort_amount_usd'] = None
+        ticker, currency = row['symbol'], row.get('currency')
+        info = infos.get(ticker, {})
+        qty, price = numeric(row.get('quantity')), numeric(row.get('close_price'))
+        multiplier = numeric(options.get(ticker, {}).get('contract_multiplier')) if ticker in option_symbols and info.get('board') == 'USOption' else Decimal(1) if info.get('board') in spot_boards else None
+        row['sort_quantity_basis'] = 'USOption数量按标准合约惯例估算，接口单位未明确声明' if ticker in option_symbols and multiplier is not None else '已核对证券板块的数量'
+        if ticker in option_symbols and multiplier is not None:
+            partial = True
+        factor = Decimal(1) if currency == 'USD' else None
+        if factor is None:
+            candidates = []
+            for rate in rates:
+                if not isinstance(rate, dict):
+                    continue
+                value = numeric(rate.get('average_rate'))
+                if value is None or value <= 0:
+                    continue
+                if rate.get('base_currency') == 'USD' and rate.get('other_currency') == currency:
+                    candidates.append(Decimal(1) / value)
+                elif rate.get('base_currency') == currency and rate.get('other_currency') == 'USD':
+                    candidates.append(value)
+            if len(candidates) == 1:
+                factor = candidates[0]
+        if qty is not None and price is not None and multiplier is not None and multiplier > 0 and factor is not None and info.get('currency') == currency:
+            row['sort_amount_usd'] = str(abs(qty * price * multiplier * factor))
+            row['sort_multiplier'] = str(multiplier)
+        else:
+            partial = True
+    rows.sort(key=lambda row: (row['sort_amount_usd'] is None, -numeric(row['sort_amount_usd']) if row['sort_amount_usd'] is not None else Decimal(0), row['symbol']))
+    holdings['sort_status'] = '部分完成' if partial else '完整'
+    return holdings
+
+
+def collect_snapshot(provider, now, report_day=None):
+    balances = {'status': '失败', 'reason': 'USD账户金额未取得', 'rows': []}
+    holdings = {'status': '失败', 'reason': '持仓未取得', 'rows': []}
+    try:
+        data = provider.get('/v1/asset/account', {'currency': 'USD'})
+        if not isinstance(data, dict) or not isinstance(data.get('list'), list):
+            raise SafeError('balance_schema')
+        rows = []
+        partial = False
         for item in data['list']:
-            if not isinstance(item,dict):partial=True;continue
-            currency=item.get('currency')
-            net,cash=numeric(item.get('net_assets')),numeric(item.get('total_cash'))
-            valid=isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency)
-            partial=partial or not valid or net is None or cash is None
-            rows.append({'currency':currency if valid else None,'net_assets':str(net) if net is not None else None,'total_cash':str(cash) if cash is not None else None})
-        balances={'status':'部分完成' if partial else '完整' if rows else '完整但为空','reason':'部分金额或币种缺失' if partial else '', 'rows':rows}
-    except (SafeError,KeyError,TypeError,ValueError):pass
+            if not isinstance(item, dict) or item.get('currency') != 'USD':
+                partial = True
+                continue
+            net, cash = numeric(item.get('net_assets')), numeric(item.get('total_cash'))
+            partial = partial or net is None or cash is None
+            rows.append({'currency': 'USD', 'net_assets': str(net) if net is not None else None, 'total_cash': str(cash) if cash is not None else None})
+        balances = {'status': '部分完成' if partial else '完整' if rows else '完整但为空', 'reason': 'USD金额缺项' if partial or not rows else '', 'rows': rows}
+    except (SafeError, KeyError, TypeError, ValueError):
+        pass
     try:
-        data=provider.get('/v1/asset/stock')
-        if not isinstance(data,dict) or not isinstance(data.get('list'),list):raise SafeError('positions_schema')
-        rows=[];partial=False
+        data = provider.get('/v1/asset/stock')
+        if not isinstance(data, dict) or not isinstance(data.get('list'), list):
+            raise SafeError('positions_schema')
+        rows, partial = [], False
         for channel in data['list']:
-            if not isinstance(channel,dict) or not isinstance(channel.get('stock_info'),list):partial=True;continue
+            if not isinstance(channel, dict) or not isinstance(channel.get('stock_info'), list):
+                partial = True
+                continue
             for item in channel['stock_info']:
-                if not isinstance(item,dict):partial=True;continue
-                qty=numeric(item.get('quantity'))
-                if qty==0:continue
-                currency=item.get('currency');currency=currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None
-                rows.append({'symbol':str(item.get('symbol') or '身份未提供'),'name':str(item.get('symbol_name') or ''),'currency':currency,'quantity':str(qty) if qty is not None else None,'cost_price':str(numeric(item.get('cost_price'))) if numeric(item.get('cost_price')) is not None else None,'price':None,'quote_time':None,'multiplier':None,'pnl':None,'gap':'盈亏所需字段尚未核对'})
-        query=sorted({row['symbol'] for row in rows if SYMBOL.fullmatch(row['symbol'])})
-        infos,quotes={},{}
-        if query:
-            try:infos=mapping(provider.call('quote.static_info',{'symbols':query}))
-            except (SafeError,KeyError,ValueError,TypeError):partial=True
-            try:quotes=mapping(provider.call('quote.quote',{'symbols':query}))
-            except (SafeError,KeyError,ValueError,TypeError):partial=True
-        options=sorted({row['symbol'] for row in rows if OPTION.fullmatch(row['symbol'])})
-        option_quotes={}
-        if options:
-            try:option_quotes=mapping(provider.call('quote.option_quote',{'symbols':options}))
-            except (SafeError,KeyError,ValueError,TypeError):partial=True
-        spot_boards={'USMain','USPink','HKEquity','SGMain','SHMainConnect','SHMainNonConnect','SHSTAR','SZMainConnect','SZMainNonConnect','SZGEMConnect','SZGEMNonConnect'}
+                if not isinstance(item, dict):
+                    partial = True
+                    continue
+                qty = numeric(item.get('quantity'))
+                if qty == 0:
+                    continue
+                currency = item.get('currency')
+                valid_currency = isinstance(currency, str) and re.fullmatch('[A-Z]{3}', currency)
+                rows.append({'symbol': str(item.get('symbol') or '身份未提供'), 'name': str(item.get('symbol_name') or ''), 'currency': currency if valid_currency else None, 'quantity': str(qty) if qty is not None else None, 'close_price': None, 'close_date': None, 'close_bar_time': None, 'gap': '收盘价未取得'})
+        calendars, prices = {}, {}
+        try:
+            sessions = provider.call('quote.trading_session') if rows else []
+        except (SafeError, ValueError, TypeError):
+            sessions = []
+        if not isinstance(sessions, list):
+            sessions = []
         for row in rows:
-            ticker=row['symbol'];info=infos.get(ticker,{});quote=quotes.get(ticker,{})
-            price=numeric(quote.get('last_done'))
-            try:stamp=moment(quote.get('timestamp'))
-            except (SafeError,ValueError,TypeError,OverflowError,OSError):stamp=None
-            if price is not None and price>0 and stamp and stamp<=now+timedelta(minutes=5):
-                row.update(price=str(price),quote_time=stamp.isoformat())
-            if OPTION.fullmatch(ticker) or info.get('board') in {'USOption','USOptionS'}:
-                mult=numeric(option_quotes.get(ticker,{}).get('contract_multiplier'))
-                row['multiplier']=str(mult) if mult is not None and mult>0 else None
-                row['gap']='期权成本单位与真实合约乘数口径未核对，本次不硬算盈亏';partial=True;continue
-            qty,cost=numeric(row['quantity']),numeric(row['cost_price'])
-            if info.get('board') not in spot_boards or not row['currency'] or info.get('currency')!=row['currency'] or qty is None or cost is None or row['price'] is None:
-                partial=True;continue
-            row['pnl']=str((price-cost)*qty);row['gap']=''
-        holdings={'status':'部分完成' if partial else '完整' if rows else '完整但为空','reason':'部分持仓盈亏待核对' if partial else '', 'rows':rows}
-    except (SafeError,KeyError,TypeError,ValueError,InvalidOperation):pass
-    return {'as_of':now.isoformat(),'balances':balances,'holdings':holdings}
+            ticker = row['symbol']
+            if SYMBOL.fullmatch(ticker) and ticker not in prices:
+                try:
+                    prices[ticker] = completed_close(provider, ticker, now, calendars, sessions)
+                except (SafeError, KeyError, ValueError, TypeError, OverflowError, OSError):
+                    prices[ticker] = None
+            close = prices.get(ticker)
+            if close and row['currency'] and row['quantity'] is not None:
+                row.update(close_price=close[0], close_date=close[1], close_bar_time=close[2], gap='')
+            else:
+                partial = True
+        holdings = {'status': '部分完成' if partial else '完整' if rows else '完整但为空', 'reason': '部分持仓或收盘价缺项' if partial else '', 'rows': rows}
+    except (SafeError, KeyError, TypeError, ValueError, InvalidOperation):
+        pass
+    holdings = sort_holdings(provider, holdings)
+    return {'as_of': now.isoformat(), 'balances': balances, 'holdings': holdings, 'daily_pnl': collect_daily_pnl(provider, report_day)}
 
 
 def collect_account(provider, now, ny):
@@ -521,7 +656,7 @@ def main():
                     account = collect_account(provider, now, ny)
                 except (SafeError, ValueError, KeyError, TypeError, InvalidOperation, OverflowError):
                     account["reason"] = "成交或交易日期查询未完成"
-                snapshot = collect_snapshot(provider, now)
+                snapshot = collect_snapshot(provider, now, account.get("date"))
                 ipo = collect_ipo(provider, now)
                 write_json(root / "account.json", {
                     "schema": "longbridge-assistant.account.v1", "generated_at": now.isoformat(),
@@ -533,7 +668,7 @@ def main():
                 }
                 input_path = root / "analysis-input.json"
                 write_json(input_path, public)
-                status = {"account_status": account["status"], "balances_status": snapshot["balances"]["status"], "holdings_status": snapshot["holdings"]["status"], "ipo_status": ipo["status"]}
+                status = {"account_status": account["status"], "balances_status": snapshot["balances"]["status"], "holdings_status": snapshot["holdings"]["status"], "sort_status": snapshot["holdings"]["sort_status"], "daily_pnl_status": snapshot["daily_pnl"]["status"], "ipo_status": ipo["status"]}
         print(json.dumps({
             "status": "collected", "output_root": str(root),
             **status, "analysis_input": str(input_path),

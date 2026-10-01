@@ -39,6 +39,6 @@ npx skills update longbridge-assistant --global
 
 更新前保存私有输出，回退使用先前验证的固定提交。可选的官方基础 Skill 单独更新；不要批量清除 longbridge-*。Agent Skills 没有统一安装后 hook，首版使用显式初始化，不声称安装会自动授权。
 
-账户采集仍按本助手限定的只读接口执行；公开研究可用长桥插件 news_search/news_detail。官方通用建议不扩大账户读取，只保留用户要求的净资产、总现金、证券持仓及其浮动盈亏所需字段，不额外获取购买力、结单、流水或交易接口。原始金额与盈亏不进入模型。
+账户采集仍按本助手限定的只读接口执行；公开研究可用长桥插件 news_search/news_detail。官方通用建议不扩大账户读取，只保留用户要求的USD净资产、USD总现金、简报单日账户盈亏、证券持仓数量与已完成常规盘收盘价，以及仅用于金额排序的必要乘数/汇率，不额外获取购买力、结单、流水或交易接口。原始金额、持仓数量及价格不进入模型。
 
 [CLI 官方安装](https://open.longbridge.com/docs/cli/install) · [可选官方基础 Skill](https://github.com/longbridge/skills/tree/03c5fde151fb5e16d1ddd5088a06d299d9971eb8/skills/longbridge) · [Agent Skills 规范](https://agentskills.io/specification)
