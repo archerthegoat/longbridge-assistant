@@ -10,7 +10,7 @@
 
 原 automation-2 提示词已通过工具同步并读回 ACTIVE；时间继续每周二至周六上海 09:00，项目/cwd/模型保留。首次自动调度 PENDING。语法、源码复核、真实采集及离线结构/权限读回分别记录；测试未新增/未运行，浏览器本地 file 策略阻止视觉检查，人类验收 PENDING，22 项清单绑定本次代码与用例版本，旧结果保留。
 
-CLI/插件 IPO 阶段差异仍未改映射，本次页面根据实际公开插件字段核实。Agent catalog 已列出助手；main 尚未合并 Skill，未发布 tag/Release。固定提交安装入口如下。本次私有 PNG 简报为单次本地数据排版导出，未增加定时图片输出契约。
+CLI/插件 IPO 阶段差异仍未改映射，本次页面根据实际公开插件字段核实。Agent catalog 已列出助手；v1.8 已合并到 main 并推送，未发布 tag/Release。可使用下列简短仓库安装入口，固定提交用于回退。本次私有 PNG 简报为单次本地数据排版导出，未增加定时图片输出契约。
 
 ## 安装与连接
 
@@ -20,7 +20,7 @@ CLI/插件 IPO 阶段差异仍未改映射，本次页面根据实际公开插�
 npx skills add archerthegoat/longbridge-assistant --skill longbridge-assistant --global
 ```
 
-上面的简短命令在 main 交付 Skill 后使用。当前已交付的固定代码入口（安装器的该版本发现仍待核对）：
+已用 skills CLI 1.7.0 对仓库默认分支执行 `--list`，实际发现 `longbridge-assistant`；该检查未安装或覆盖任何 Skill。需要固定本次代码版本时使用：
 
 ```bash
 npx skills@1.7.0 add "https://github.com/archerthegoat/longbridge-assistant/tree/8d28175b43db8ac567bc19bb67432fef137b48d2/skills/longbridge-assistant" --skill longbridge-assistant --global
