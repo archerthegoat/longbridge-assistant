@@ -250,9 +250,8 @@ def collect_daily_pnl(provider, report_day):
     if not report_day:
         return result
     try:
-        day = datetime.fromisoformat(report_day).date()
-        start = int(datetime.combine(day, time.min, UTC).timestamp())
-        data = provider.get('/v1/portfolio/profit-analysis-summary', {'start': str(start), 'end': str(start + 86399)})
+        datetime.fromisoformat(report_day).date()
+        data = provider.get('/v1/portfolio/profit-analysis-summary', {'start_date': report_day, 'end_date': report_day})
         if not isinstance(data, dict):
             raise SafeError('daily_pnl_schema')
         summary = data.get('summary', data)
